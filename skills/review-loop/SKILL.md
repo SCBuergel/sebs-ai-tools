@@ -33,8 +33,10 @@ agent's id; every later round goes to this same agent.
 - `APPROVED <range>`: push, then tell the user what was pushed and any
   `Optional:` items you left alone.
 - `NOT APPROVED <range>`: fix each finding in the code, never by weakening
-  a check or an invariant the repository's guide names. Run the tests and
-  commit. Then resume the same reviewer with SendMessage: the range,
+  a check or an invariant the repository's guide names. Run the tests, check
+  with `git branch --show-current` that you are still on the branch you
+  started on (a reviewer that switched the checkout would otherwise put the
+  fix on a detached HEAD), and commit. Then resume the same reviewer with SendMessage: the range,
   recomputed as in step 1 so it includes the fix commits, plus one line per
   earlier finding saying fixed, or why you think it is wrong. Never start a
   second reviewer for the same batch; a fresh one would not know what it

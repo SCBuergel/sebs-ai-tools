@@ -41,7 +41,7 @@
       "source": "./skills/review-loop",
       "strict": false,
       "skills": ["./"],
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Send the latest local commits to the reviewer session running next to this one, fix its findings, resubmit, and push only on APPROVED.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
