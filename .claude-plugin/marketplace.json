@@ -22,7 +22,7 @@
       "source": "./skills/test-gnosis-vpn",
       "strict": false,
       "skills": ["./"],
-      "version": "0.5.0",
+      "version": "0.5.1",
       "description": "Install, fund and test the latest Gnosis VPN client on a remote Linux server over SSH without locking yourself out, from a throwaway VM to returning its funds.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
