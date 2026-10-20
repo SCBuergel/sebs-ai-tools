@@ -1,12 +1,12 @@
 # Seb's AI tools
 
-Seb's AI tools are skills and agents for Claude Code. A skill is a set of instructions, in a
-`SKILL.md` file, that Claude loads into the current session when a task
-calls for it; its work happens in that session, where you can watch it. An
-agent is a separate Claude with its own instructions and tools, which the
-session starts for one delimited task and which reports back; it does not
-see the session's conversation, which is the point when the task is an
-independent check such as a review.
+Seb's AI tools are skills and agents for Claude Code. A skill is a set of
+instructions, in a `SKILL.md` file, that Claude loads into the current
+session when a task calls for it; its work happens in that session, where
+you can watch it. An agent is a separate Claude with its own instructions
+and tools, which the session starts for one delimited task and which
+reports back; it does not see the session's conversation, which is the
+point when the task is an independent check such as a review.
 
 This repository is a Claude Code
 [plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
