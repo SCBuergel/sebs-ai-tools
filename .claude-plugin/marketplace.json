@@ -31,7 +31,7 @@
       "name": "commit-reviewer",
       "source": "./agents/commit-reviewer",
       "strict": false,
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Independent read-only reviewer agent: give it a commit range and it answers APPROVED or NOT APPROVED with findings, after reading the repository's AI guide and running its tests.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"

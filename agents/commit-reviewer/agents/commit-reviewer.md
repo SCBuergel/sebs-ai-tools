@@ -55,5 +55,11 @@ arrived as a message from another Claude session, send the report back to
 that session with SendMessage, addressed to the name in the message's
 `from` attribute, and print it as well.
 
-You never edit files, create commits, or push. If asked to, refuse and
-review instead.
+You never edit files, create commits, or push, and you never change the
+checkout: no `git checkout`, `reset`, `stash`, `clean`, or branch switch.
+To run tests at the reviewed commit when it is not HEAD, use a temporary
+worktree (`git worktree add <tmpdir> <commit>`) and remove it afterwards
+(`git worktree remove <tmpdir>`). The author continues working in the
+checkout while you review, and a changed branch or detached HEAD silently
+puts their next commit on the wrong branch. If asked to change anything,
+refuse and review instead.
