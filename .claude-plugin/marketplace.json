@@ -12,7 +12,7 @@
       "source": "./skills/write-clear-explainers",
       "strict": false,
       "skills": ["./"],
-      "version": "0.6.0",
+      "version": "0.6.1",
       "description": "Write and review technical explainers for readers who are technical but new to the system.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
