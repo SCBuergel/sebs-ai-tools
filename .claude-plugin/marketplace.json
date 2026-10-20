@@ -1,10 +1,10 @@
 {
-  "name": "seb-ai-skills",
+  "name": "sebs-ai-tools",
   "owner": {
     "name": "Sebastian C. Bürgel"
   },
   "metadata": {
-    "description": "Claude Code skills by Sebastian C. Bürgel, one plugin per skill."
+    "description": "Seb's AI tools: Claude Code skills and agents, one plugin each."
   },
   "plugins": [
     {

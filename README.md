@@ -1,6 +1,6 @@
-# seb-ai-skills
+# Seb's AI tools
 
-Skills and agents for Claude Code. A skill is a set of instructions, in a
+Seb's AI tools are skills and agents for Claude Code. A skill is a set of instructions, in a
 `SKILL.md` file, that Claude loads into the current session when a task
 calls for it; its work happens in that session, where you can watch it. An
 agent is a separate Claude with its own instructions and tools, which the
@@ -10,7 +10,7 @@ independent check such as a review.
 
 This repository is a Claude Code
 [plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
-named `seb-ai-skills`. A marketplace lists plugins, which are what you
+named `sebs-ai-tools`. A marketplace lists plugins, which are what you
 install. Each plugin here contains exactly one skill or one agent with the
 same name, so you install only what you want.
 
@@ -27,19 +27,19 @@ same name, so you install only what you want.
 ## Install
 
 In a terminal, add the marketplace once, then install each plugin you want
-as `<plugin>@seb-ai-skills`:
+as `<plugin>@sebs-ai-tools`:
 
 ```sh
-claude plugin marketplace add SCBuergel/seb-ai-skills
-claude plugin install write-clear-explainers@seb-ai-skills
-claude plugin install test-gnosis-vpn@seb-ai-skills
-claude plugin install review-loop@seb-ai-skills
-claude plugin install commit-reviewer@seb-ai-skills
+claude plugin marketplace add SCBuergel/sebs-ai-tools
+claude plugin install write-clear-explainers@sebs-ai-tools
+claude plugin install test-gnosis-vpn@sebs-ai-tools
+claude plugin install review-loop@sebs-ai-tools
+claude plugin install commit-reviewer@sebs-ai-tools
 ```
 
 Inside a running Claude Code session, use the same commands with `/plugin`
 in place of `claude plugin`, for example
-`/plugin install write-clear-explainers@seb-ai-skills`, then run
+`/plugin install write-clear-explainers@sebs-ai-tools`, then run
 `/reload-plugins` to load what you installed. A session started after the
 install loads it automatically.
 
@@ -96,16 +96,16 @@ To get the latest version, refresh the marketplace listing, then update the
 plugin. Start a new session or run `/reload-plugins` afterwards.
 
 ```sh
-claude plugin marketplace update seb-ai-skills
-claude plugin update write-clear-explainers@seb-ai-skills
+claude plugin marketplace update sebs-ai-tools
+claude plugin update write-clear-explainers@sebs-ai-tools
 ```
 
 To remove a skill or agent, uninstall its plugin. Remove the marketplace
 only if you no longer want anything from it.
 
 ```sh
-claude plugin uninstall write-clear-explainers@seb-ai-skills
-claude plugin marketplace remove seb-ai-skills
+claude plugin uninstall write-clear-explainers@sebs-ai-tools
+claude plugin marketplace remove sebs-ai-tools
 ```
 
 ## Maintain this repository
@@ -205,8 +205,8 @@ installed plugins untouched:
 ```sh
 export CLAUDE_CONFIG_DIR=$(mktemp -d)
 claude plugin marketplace add ./
-claude plugin install <plugin-name>@seb-ai-skills
-claude plugin details <plugin-name>@seb-ai-skills
+claude plugin install <plugin-name>@sebs-ai-tools
+claude plugin details <plugin-name>@sebs-ai-tools
 unset CLAUDE_CONFIG_DIR
 ```
 
