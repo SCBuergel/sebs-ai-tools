@@ -31,7 +31,7 @@ for p in sorted(glob.glob(os.path.join(D, "val", "*.txt"))):
         subprocess.run([os.path.join(D, "ev"), "dispatcher", kind, i, msg])
         state[i] = (kind, msg)
 q = [i for i, (k, m) in state.items() if k == "valid"]
-q.sort(key=lambda i: (RANK.get(state[i][1], 9), arrival[i]))
+q.sort(key=lambda i: (RANK.get(state[i][1], 9), arrival.get(i, len(arrival))))  # a verdict without a reported finding sorts last
 print("DEV QUEUE:", " ".join(f"{i}({state[i][1]})" for i in q) or "empty")
 print("UNVALIDATED:", " ".join(i for i, (k, m) in state.items() if k in ("reported", "validating")) or "none",
       "| NEW:", " ".join(i for i in arrival if i not in state) or "none")

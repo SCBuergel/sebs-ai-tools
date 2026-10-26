@@ -22,8 +22,9 @@ while :; do
 		f="$S/test.lock"; [ "$i" -eq 1 ] || f="$S/test.lock.$i"
 		exec {fd}>"$f"
 		if flock -n "$fd"; then
-			printf '{"slot": %d, "pid": %d, "start": %d, "cwd": "%s", "cmd": "%s"}\n' \
-				"$i" $$ "$(date +%s)" "$PWD" "$*" > "$S/slots/$i.json"
+			python3 -c 'import json, sys; print(json.dumps({"slot": int(sys.argv[1]), "pid": int(sys.argv[2]), '\
+'"start": int(sys.argv[3]), "cwd": sys.argv[4], "cmd": " ".join(sys.argv[5:])}))' \
+				"$i" $$ "$(date +%s)" "$PWD" "$@" > "$S/slots/$i.json"
 			run "$@"; rc=$?
 			rm -f "$S/slots/$i.json"; exit "$rc"
 		fi

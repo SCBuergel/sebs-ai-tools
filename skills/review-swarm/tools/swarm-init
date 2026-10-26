@@ -33,11 +33,15 @@ git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
 [ -z "$(git -C "$repo" status --porcelain)" ] || { echo "the repository has uncommitted changes" >&2; exit 1; }
 source=$(git -C "$repo" branch --show-current)
 [ -n "$source" ] || { echo "the repository is on a detached HEAD; check out the source branch" >&2; exit 1; }
-case "$swarm" in "$repo"/*) echo "the swarm folder must be outside the repository" >&2; exit 1 ;; esac
+swarm=$(realpath -m "$swarm")
+case "$swarm" in "$repo"|"$repo"/*) echo "the swarm folder must be outside the repository" >&2; exit 1 ;; esac
+if [ "$source" = swarm-review ]; then  # a rerun: the source branch is the one recorded at the first run
+	source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_branch"])' "$swarm/swarm.json" 2>/dev/null) \
+		|| { echo "the repository is on swarm-review and $swarm/swarm.json does not say which branch it came from" >&2; exit 1; }
+fi
 [ -n "$slots" ] || slots=$(( $(nproc) / 3 )); [ "$slots" -ge 1 ] || slots=1
 
 mkdir -p "$swarm" "$swarm/queue" "$swarm/val" "$swarm/slots"
-swarm=$(realpath "$swarm")
 for f in ev tlock devqueue lastmsg dash.py dash.html dashweb.py; do
 	[ -e "$swarm/$f" ] || cp "$here/$f" "$swarm/$f"
 done

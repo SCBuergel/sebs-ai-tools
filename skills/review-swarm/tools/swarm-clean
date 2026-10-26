@@ -25,7 +25,9 @@ for t in "$swarm"/base "$swarm"/dev*; do
 done
 git -C "$repo" worktree prune
 for b in $(git -C "$repo" for-each-ref --format='%(refname:short)' 'refs/heads/swarm-dev*'); do
-	if git -C "$repo" branch -d "$b" >/dev/null 2>&1; then
+	if git -C "$repo" worktree list --porcelain | grep -qx "branch refs/heads/$b"; then
+		echo "$b is still checked out in a kept worktree; kept" >&2
+	elif git -C "$repo" branch -d "$b" >/dev/null 2>&1; then
 		echo "deleted branch $b"
 	else
 		echo "$b has commits not in the checked-out branch; kept" >&2

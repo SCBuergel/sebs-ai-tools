@@ -105,9 +105,10 @@ agent; a dev's commit-reviewer inherits the dev's.
 Run this loop until every finding is agreed, rejected or unresolved. Record
 each transition with `$SW/ev dispatcher <kind> <id> "<msg>"`, kinds
 `validating`, `valid <severity>` (written by `devqueue`), `invalid`,
-`duplicate`, `dev` (handed to a dev), `coord` (fix being checked), `agreed`,
-`unresolved`, and `note` for free-text narration the user reads on the
-dashboards. Never judge a finding yourself: forward, record, and resume.
+`duplicate`, `dev` (handed to a dev), `coord` (fix being checked by the
+coordinator), `rev` (by the reporting reviewer), `agreed`, `unresolved`, and
+`note` for free-text narration the user reads on the dashboards. Never judge
+a finding yourself: forward, record, and resume.
 
 1. A reviewer reports `R3-2`: send the coordinator `VALIDATE R3-2`, log
    `validating`.
@@ -123,12 +124,17 @@ dashboards. Never judge a finding yourself: forward, record, and resume.
    `CHECK <id> commits=<hashes>` with the dev's report, log `coord`.
    `BLOCKED` or `DISPUTE`: send the coordinator the dev's report and let it
    decide, or hand the question to the user if the two disagree.
-6. The coordinator replies `CONFIRMED`: log `agreed`, give the dev its next
-   finding. `REVISE <id> round k`: forward to the dev as
+6. The coordinator replies `CONFIRMED`: send the reporting reviewer
+   `VERIFY <id>` with the commit hashes, log `rev`, and give the dev its next
+   finding meanwhile. `REVISE <id> round k`: forward to the dev as
    `REVISE <id> round k` with the numbered requests, log `dev`.
    `UNRESOLVED`: log `unresolved`, tell the user, and send the dev
    `REVERT <id>` if the coordinator asked for it.
-7. A reviewer reports `done`: nothing to do. When all reviewers are done,
+7. The reviewer replies `SATISFIED`: log `agreed`. `NOT SATISFIED`: send its
+   reasons to the coordinator as part of a new `CHECK <id>`, log `coord`; the
+   coordinator decides whether they become a REVISE. A reviewer that no
+   longer exists (its session ended) is skipped: log `agreed` on CONFIRMED.
+8. A reviewer reports `done`: nothing to do. When all reviewers are done,
    the queue is empty and every dev is idle, go to section 6.
 
 A dev must not fast-forward `swarm-review` before its post-rebase test run

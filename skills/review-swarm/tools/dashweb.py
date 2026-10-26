@@ -3,7 +3,8 @@
 
 Serves only dash.html, swarm.json, events.jsonl, queue/ and val/ from this directory, plus /sys.json
 (memory, load and test slots, built from /proc and slots/ by dash.py's machine()), on localhost,
-standard library only.
+standard library only. Requests whose Host header is not this server's own address are refused, so
+a web page open in the same browser cannot read the findings through DNS rebinding.
 """
 import functools, http.server, importlib.util, json, os, sys
 
@@ -26,17 +27,39 @@ MACHINE = load_machine()
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
+    def allowed(self):
+        """The path to serve, after the Host and allowlist checks; None once an error was sent."""
+        host = self.headers.get("Host", "").rsplit(":", 1)[0]
+        if host not in ("127.0.0.1", "localhost", "[::1]"):
+            self.send_error(403, "wrong Host")
+            return None
         p = self.path.split("?")[0]
         p = "/dash.html" if p == "/" else p
+        if p != "/sys.json" and p not in ("/dash.html", "/events.jsonl", "/swarm.json") \
+                and not p.startswith(("/queue/", "/val/")):
+            self.send_error(404)
+            return None
+        return p
+
+    def do_GET(self):
+        p = self.allowed()
+        if p is None:
+            return
         if p == "/sys.json":
             return self.send_sys()
-        if p not in ("/dash.html", "/events.jsonl", "/swarm.json") and not p.startswith(("/queue/", "/val/")):
-            return self.send_error(404)
         self.path = p
         super().do_GET()
 
-    def send_sys(self):
+    def do_HEAD(self):
+        p = self.allowed()
+        if p is None:
+            return
+        if p == "/sys.json":
+            return self.send_sys(head=True)
+        self.path = p
+        super().do_HEAD()
+
+    def send_sys(self, head=False):
         try:
             body = json.dumps(MACHINE()).encode()
         except Exception:
@@ -45,7 +68,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if not head:
+            self.wfile.write(body)
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
