@@ -65,9 +65,10 @@ them again. Leave the heading with "none recorded" if there are none. -->
 ## Resource limits
 - Reviewers and the coordinator run no test suites. Read and grep only.
 - Every test run (devs and their commit-reviewers alike) goes through
-  `$SW/tlock <test command>`: it waits for one of the {{SLOTS}} test slots (slots/count), runs the
-  command under a memory cap, and records the holder in slots/<n>.json. One command per run; a run
-  may wait for another agent's. Never start a test run any other way.
+  `$SW/tlock <test command>`: it waits for a free test slot (there are {{SLOTS}} at the start; the
+  number is in slots/count and may change), runs the command under a memory cap, and records the
+  holder in slots/1.json, slots/2.json and so on. One command per run; a run may wait for another
+  agent's. Never start a test run any other way.
 - A commit-reviewer reruns the test suite itself, but repeats a slow extra check (for example a
   mutation run) only for a check changed in the range; the dev's report lists the others.
 - Never run commands that change the machine or anything outside the worktrees: no provisioning,

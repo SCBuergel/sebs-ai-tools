@@ -3,8 +3,8 @@
 #
 # Waits for a free slot (the number is in slots/count, or SWARM_TEST_SLOTS), runs the command under a
 # memory cap (SWARM_TEST_MEM, default 2G, through systemd-run; without systemd-run the command runs
-# uncapped and a warning says so) and records the holder in slots/<n>.json for the dashboards.
-# Every agent starts every test run through this, so at most <count> runs share the machine.
+# uncapped and a warning says so) and records the holder in slots/1.json, slots/2.json, ... for the dashboards.
+# Every agent starts every test run through this, so at most that many runs share the machine.
 set -u
 S=$(dirname "$(realpath "$0")")
 N=${SWARM_TEST_SLOTS:-$(cat "$S/slots/count" 2>/dev/null || echo 1)}

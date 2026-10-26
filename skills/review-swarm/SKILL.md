@@ -45,12 +45,22 @@ dashboards, `swarm-init` and `swarm-clean` set up and tear down.
 
 ## 2. Size the swarm
 
-The limits are CPU and the tests, not memory: idle agents cost nothing, but
-every dev and every commit-reviewer runs the test suite, and only
-`slots/count` runs go at once. Reasonable defaults: 6 to 10 reviewers (one
-per area the task splits into), devs = CPUs / 2 rounded up to at most 8,
-test slots = CPUs / 3, at least 1. Check with `nproc` and `free -h`. More devs
-than slots only queue on `tlock`.
+The limit is the test suite: idle agents cost almost nothing, but every dev
+and every commit-reviewer runs the tests. A test slot is a permit to run the
+tests: with S slots, at most S test runs go at once across the whole swarm,
+and any further run waits in `tlock` until one ends. Reasonable defaults: 6 to
+10 reviewers (one per area the task splits into), devs = CPUs - 1 (at least
+2, at most 8), test slots = CPUs / 2 rounded up (what `swarm-init` picks
+when `--slots` is left out). Each test run is capped at `SWARM_TEST_MEM` (2G),
+so pass a lower `--slots` when slots × 2 GB plus 4 GB does not fit the
+machine's memory. Check with `nproc` and `free -h`. More devs than slots is
+fine: the devs spend most of their time reading, editing and waiting on their
+reviewer, not testing.
+
+The slot count can be changed while the swarm runs: `echo 4 > $SW/slots/count`
+applies to every test run that starts afterwards. Raise it when the
+dashboard's load stays below the CPU count while slots are all busy; lower it
+when load goes red or memory amber.
 
 Split the task into areas by trust boundary or subsystem, so that two
 reviewers do not read the same files for the same question. Name each area
@@ -70,7 +80,7 @@ repository:
 It copies the tools, writes `swarm.json`, `PROTOCOL.md` and `severity.md`,
 creates branch `swarm-review` at HEAD and checks it out in the repository (the
 integration tree), the detached worktree `$SW/base` that reviewers read, and
-one worktree per dev on `swarm-dev<n>`. Run it a second time and it completes
+one worktree per dev on `swarm-dev1`, `swarm-dev2`, and so on. Run it a second time and it completes
 what is missing and keeps what exists.
 
 Then edit `$SW/PROTOCOL.md`: fill in the Task section (what the swarm reviews
@@ -102,7 +112,10 @@ Fill each brief from `roles/` by replacing its `{{...}}` placeholders
 `{{FIRST_ID}}`, `{{TRAILER}}`: the commit trailer lines this session is told
 to add, as " and end with these lines:" plus the lines, or nothing) and start
 each agent with the Agent tool, `subagent_type` general-purpose, in the
-background. Record every agent's id in `$SW/ids.txt` as `<name> <id>`; a
+background. Before the first reviewer, write each reviewer's area sentence,
+the one that fills its `{{AREA}}`, to `$SW/areas.json` as
+`{"R1": "<area>", "R2": "<area>", ...}`; the web dashboard shows it when the
+user opens a reviewer. Record every agent's id in `$SW/ids.txt` as `<name> <id>`; a
 later session needs them to resume the agents.
 
 Start the reviewers and the coordinator first; start a dev when the first
@@ -158,7 +171,17 @@ dev's message is lost, `$SW/lastmsg <agent id>` prints its last reply.
    combined range of the swarm's fixes, each already reviewed on its own,
    that tests run only through `$SW/tlock`, and that the push happens in the
    next step rather than in the loop. Fix its findings through a dev, not by
-   hand.
+   hand, each as a new finding `F-1`, `F-2`, ... (never under the id of a
+   finding it touches: `agreed`, `unresolved`, `invalid` and `duplicate` are
+   final, and an event after them reopens the finding on the dashboards).
+   For each: write `$SW/queue/F-<n>.json` with the keys a reviewer uses
+   (reviewer `"final"`) and `$SW/val/F-<n>.txt` with the first line
+   `VALID F-<n> <severity>` followed by the review's text as the fix
+   requirements, run `$SW/ev final reported F-<n> "<title>"` and
+   `$SW/devqueue`, then hand it to a dev as in section 5 (`dev`). The
+   coordinator and reviewer steps are skipped: when the dev reports `DONE`,
+   resume the same final reviewer on the new range, and on APPROVED log
+   `agreed F-<n> "final review APPROVED"` for every open `F-<n>`.
 2. On APPROVED, follow the repository's push rules: switch the repository
    back to the source branch, `git merge --ff-only swarm-review`, and push if
    the user's rules allow it, otherwise ask.

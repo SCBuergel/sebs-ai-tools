@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Serve the swarm web dashboard.  python3 dashweb.py [PORT]   then open http://127.0.0.1:8765/  (Ctrl-C stops it).
 
-Serves only dash.html, swarm.json, events.jsonl, queue/ and val/ from this directory, plus /sys.json
+Serves only dash.html, swarm.json, areas.json, events.jsonl, queue/ and val/ from this directory, plus /sys.json
 (memory, load and test slots, built from /proc and slots/ by dash.py's machine()), on localhost,
 standard library only. Requests whose Host header is not this server's own address are refused, so
 a web page open in the same browser cannot read the findings through DNS rebinding.
@@ -35,7 +35,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None
         p = self.path.split("?")[0]
         p = "/dash.html" if p == "/" else p
-        if p != "/sys.json" and p not in ("/dash.html", "/events.jsonl", "/swarm.json") \
+        if p != "/sys.json" and p not in ("/dash.html", "/events.jsonl", "/swarm.json", "/areas.json") \
                 and not p.startswith(("/queue/", "/val/")):
             self.send_error(404)
             return None

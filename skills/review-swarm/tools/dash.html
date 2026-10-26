@@ -33,15 +33,15 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 /* Top bar */
 .top { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
-  padding: 10px 16px; background: rgba(4,8,7,.94); backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(61,255,162,.25), 0 8px 24px rgba(0,0,0,.5); }
+  padding: 10px 16px; background: #040807;
+  border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(61,255,162,.25); }
 .top h1 { font: 600 15px var(--mono); letter-spacing: .14em; margin: 0; display: flex; gap: 10px; align-items: center;
   color: var(--neon); text-shadow: 0 0 10px rgba(61,255,162,.45); text-transform: uppercase; }
 .top h1 .prompt { color: var(--ink-3); text-shadow: none; }
-#title::after { content: '_'; margin-left: 2px; animation: blink 1.1s steps(1) infinite; }
-.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 0 0 rgba(61,255,162,.6); animation: pulse 1.6s infinite; }
-.pulse.stale { background: var(--serious); animation: none; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61,255,162,.55);} 70% { box-shadow: 0 0 0 8px rgba(61,255,162,0);} 100% { box-shadow: 0 0 0 0 rgba(61,255,162,0);} }
+/* Nothing on this page animates endlessly: without a GPU every animated frame is a software repaint */
+#title::after { content: '_'; margin-left: 2px; }
+.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--neon); }
+.pulse.stale { background: var(--serious); }
 .top .meta { color: var(--ink-2); display: flex; gap: 14px; flex-wrap: wrap; font: 12.5px var(--mono); }
 .top nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 .top nav button, .top nav a { padding: 4px 10px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--ink-2); font: 12px var(--mono); text-transform: lowercase; }
@@ -114,10 +114,21 @@ main.focus section:not(.focused) { display: none; }
 .arow .age { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
 .arow .fid { font-family: var(--mono); font-size: 12px; color: var(--ink); }
 .arow .n { font-family: var(--mono); font-size: 11.5px; color: var(--yellow); }
+.arow.rev .name::before { content: '▸ '; color: var(--ink-3); }
+.arow.rev.open { border-color: var(--line-2); border-radius: 3px 3px 0 0; }
+.arow.rev.open .name::before { content: '▾ '; }
+.rdetail { display: grid; gap: 8px; padding: 8px; margin-top: -4px; background: var(--surface-2); border: 1px solid var(--line-2); border-top: 0; border-radius: 0 0 3px 3px; }
+.rfind { display: grid; grid-template-columns: 74px 52px 170px minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 4px; border-radius: 3px; cursor: pointer; }
+.rfind:hover { background: var(--line); }
+.rfind:hover .id { color: var(--neon); text-decoration: underline; }
+.rfind.gone { cursor: help; opacity: .55; }
+.rfind.gone:hover .id { color: inherit; text-decoration: none; }
+.rfind .lab { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+.rfind .title { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow.flash td { box-shadow: inset 0 1px 0 var(--neon), inset 0 -1px 0 var(--neon); }
 .state { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--line-2); }
 .state.done { background: var(--good); box-shadow: 0 0 6px var(--good); }
-.state.busy { background: var(--yellow); animation: blink 1.2s infinite; }
-@keyframes blink { 50% { opacity: .35; } }
+.state.busy { background: var(--yellow); }
 .sub { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
 
 /* Pipeline */
@@ -138,7 +149,7 @@ main.focus section:not(.focused) { display: none; }
 .track { display: inline-flex; align-items: center; gap: 0; }
 .track .d { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--line-2); display: inline-block; }
 .track .d.done { background: var(--good); border-color: var(--good); box-shadow: 0 0 5px rgba(46,216,114,.6); }
-.track .d.cur { background: var(--yellow); border-color: var(--yellow); animation: blink 1.2s infinite; }
+.track .d.cur { background: var(--yellow); border-color: var(--yellow); }
 .track .d.bad { background: var(--critical); border-color: var(--critical); }
 .track .l { width: 12px; height: 2px; background: var(--line-2); display: inline-block; }
 .track .l.done { background: var(--good); }
@@ -233,11 +244,11 @@ section > header h2 { white-space: nowrap; }
 </head>
 <body>
 <div class="top">
-  <h1 data-tip="<b>Swarm</b><br>The title from swarm.json in the swarm folder. The dot pulses green while the page reads the log every 2 seconds and turns orange when a read fails (the server stopped, or the folder moved)."><span class="pulse" id="pulse"></span><span class="prompt">&gt;</span><span id="title">REVIEW SWARM</span></h1>
+  <h1 data-tip="<b>Swarm</b><br>The title from swarm.json in the swarm folder. The dot is green while the page reads the log every 5 seconds and turns orange when a read fails (the server stopped, or the folder moved)."><span class="pulse" id="pulse"></span><span class="prompt">&gt;</span><span id="title">REVIEW SWARM</span></h1>
   <div class="meta">
     <span data-tip="<b>Elapsed</b><br>Time since the first event in events.jsonl, i.e. since the swarm started.">⏱ <span id="elapsed">–</span></span>
     <span data-tip="<b>Events</b><br>Lines in events.jsonl, the shared log every agent appends to with the ev helper.">📜 <span id="nev">–</span> events</span>
-    <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 2 seconds; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
+    <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 5 seconds while the tab is visible and redraws only what changed; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
   </div>
   <nav>
     <a href="#overview" data-tip="Jump to <b>Overview</b>: reviews done, finding counts, progress and the latest note.">overview</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
@@ -264,7 +275,7 @@ section > header h2 { white-space: nowrap; }
   </section>
 
   <section id="machine">
-    <header data-tip="<b>Machine</b><br>Memory, swap, CPU load and test slots of this machine, read from /proc and slots/ every 2 seconds, so memory pressure shows before the kernel starts killing processes. Click to collapse, ⤢ to focus on this section alone.">
+    <header data-tip="<b>Machine</b><br>Memory, swap, CPU load and test slots of this machine, read from /proc and slots/ every 5 seconds, so memory pressure shows before the kernel starts killing processes. Click to collapse, ⤢ to focus on this section alone.">
       <span class="chev">▼</span><h2>Machine</h2><span class="badge" id="machbadge" data-tip="<b>Machine summary</b><br>Memory available, 1-minute load against the CPU count, and busy test slots. Turns amber or red with the tiles below."></span><span class="help">?</span>
       <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
@@ -281,7 +292,7 @@ section > header h2 { white-space: nowrap; }
     </header>
     <div class="body agents">
       <div>
-        <p class="sub" data-tip="<b>Reviewers</b><br>Read-only auditors, one per area of the reviewed tree. Each writes its findings to queue/&amp;lt;id&amp;gt;.json and then finishes. The ⚑ number counts the findings it reported.">Reviewers <span class="help">?</span></p>
+        <p class="sub" data-tip="<b>Reviewers</b><br>Read-only auditors, one per area of the reviewed tree. Click a reviewer to see its area and the findings it reported. Each writes its findings to the queue folder (queue/R3-1.json is reviewer R3's first) and then finishes. The ⚑ number counts the findings it reported.">Reviewers <span class="help">?</span></p>
         <div class="alist" id="reviewers"></div>
       </div>
       <div>
@@ -301,8 +312,8 @@ section > header h2 { white-space: nowrap; }
       <div class="tablewrap"><table class="ptable">
         <thead><tr>
           <th data-tip="<b>Severity</b><br>The coordinator's rating when it validated the finding: Critical, High, Medium, Low or Info. ? means not validated yet.">Sev</th>
-          <th data-tip="<b>Id</b><br>Reviewer name and a running number, e.g. R10-1 is the first finding of reviewer R10.">Id</th>
-          <th data-tip="<b>Stage track</b><br>Five dots: reported → validated → dev → coordinator → agreed. Green are passed, the blinking yellow one is where the finding is now.">Stage</th>
+          <th data-tip="<b>Id</b><br>Reviewer name and a running number, e.g. R10-1 is the first finding of reviewer R10. F-1, F-2, … come from the final review of all fixes together, before the push.">Id</th>
+          <th data-tip="<b>Stage track</b><br>Five dots: reported → validated → dev → coordinator → agreed. Green are passed, the yellow one is where the finding is now.">Stage</th>
           <th data-tip="<b>State</b><br>What is happening to the finding right now and who holds it, as recorded by the dispatcher.">State</th>
           <th data-tip="<b>Round</b><br>How many times a dev was handed this finding. After 4 rounds without agreement it becomes unresolved.">Round</th>
           <th data-tip="<b>Title</b><br>The reviewer's one-line summary. While a dev works on it, the review-loop steps of this round show underneath.">Title</th>
@@ -327,7 +338,7 @@ section > header h2 { white-space: nowrap; }
       <div class="feed" id="feed"></div>
     </div>
   </section>
-  <div class="foot"><span data-tip="<b>Where this comes from</b><br>Everything on this page is read from files in the swarm folder (events.jsonl, swarm.json, queue/, val/) and /proc. dashweb.py serves it on 127.0.0.1 only and refuses requests with a foreign Host header, so findings stay on this machine.">-----BEGIN SWARM STATE----- // read from files · served on 127.0.0.1 only // -----END SWARM STATE-----</span></div>
+  <div class="foot"><span data-tip="<b>Where this comes from</b><br>Everything on this page is read from files in the swarm folder (events.jsonl, swarm.json, areas.json, queue/, val/) and /proc. dashweb.py serves it on 127.0.0.1 only and refuses requests with a foreign Host header, so findings stay on this machine.">-----BEGIN SWARM STATE----- // read from files · served on 127.0.0.1 only // -----END SWARM STATE-----</span></div>
 </main>
 <div id="tip"></div>
 <style id="devstyle"></style>
@@ -348,8 +359,8 @@ function roster(cfg, evs) {
 }
 const SEV = {Critical:'var(--critical)', High:'var(--serious)', Medium:'var(--warn)', Low:'var(--blue)', Info:'var(--ink-3)'};
 const STAGES = [
-  ['reported', 'A reviewer wrote the finding to queue/<id>.json and announced it.'],
-  ['validated', 'The coordinator confirmed the finding is real, rated its severity and wrote val/<id>.txt.'],
+  ['reported', 'A reviewer wrote the finding to the queue folder (for example queue/R3-1.json) and announced it.'],
+  ['validated', 'The coordinator confirmed the finding is real, rated its severity and wrote its verdict to the val folder (for example val/R3-1.txt).'],
   ['dev', 'A dev fixes it in its own worktree and branch, runs the tests, and loops with its own commit-reviewer until APPROVED, then fast-forwards swarm-review.'],
   ['coordinator', 'The coordinator checks the merged fix against its validation.'],
   ['agreed', 'Fix accepted: approved by the dev\'s reviewer and confirmed by the coordinator. Done.'],
@@ -379,7 +390,7 @@ const PHASE = {
 // What each event kind means, for the live feed's tooltips. The dispatcher's finding states come from STATE.
 const KIND = {
   status: 'The agent reports what it is doing.',
-  reported: 'A reviewer reported a finding and wrote queue/<id>.json.',
+  reported: 'A reviewer reported a finding and wrote it to the queue folder, for example queue/R3-1.json.',
   done: 'A reviewer finished its area.',
   idle: 'A dev finished its finding and waits for the next one.',
   focus: 'The area this agent covers.',
@@ -406,8 +417,9 @@ const store = {
   set(k, v) { try { localStorage.setItem('swarm.'+k, JSON.stringify(v)); } catch (e) {} },
 };
 
-let evs = [], queue = {}, val = {}, mach = null, cfg = {}, stale = false, tick = 0;
-const openRows = new Set(store.get('open', []));
+let evs = [], queue = {}, val = {}, mach = null, cfg = {}, areas = {}, stale = false, tick = 0;
+const openRows = new Set(store.get('open', [])), openRevs = new Set(store.get('openrev', []));
+let flash = {id: '', until: 0};  // the pipeline row a reviewer's finding link jumped to, outlined for a moment
 
 async function fetchText(p) {
   const r = await fetch(p + '?t=' + Date.now(), {cache:'no-store'});
@@ -415,24 +427,46 @@ async function fetchText(p) {
   return r.text();
 }
 
+// Redraw only what changed: the machine panel when sys.json changes, everything when the log, swarm.json,
+// areas.json or a finding's files change, and everything every 30 s so the "ago" times stay current.
+// Without a GPU every redraw is a software repaint, so an unchanged poll must cost next to nothing.
+let lastTxt = null, lastSys = null, lastCfg = null, lastAreas = null, lastFull = 0, polling = false;
 async function poll() {
+  if (polling || document.hidden) return;
+  polling = true;
+  let changed = false;
+  const wasStale = stale;
   try {
-    try { mach = JSON.parse(await fetchText('sys.json')); } catch (e) { mach = null; }
-    if (tick % 15 === 0) { try { cfg = JSON.parse(await fetchText('swarm.json')); } catch (e) {} }
+    let sys = '';
+    try { sys = await fetchText('sys.json'); } catch (e) {}
+    if (sys !== lastSys) { lastSys = sys; try { mach = JSON.parse(sys); } catch (e) { mach = null; } renderMachine(Date.now()/1000); }
+    if (tick % 6 === 0) {
+      try { const t = await fetchText('swarm.json'); if (t !== lastCfg) { lastCfg = t; cfg = JSON.parse(t); changed = true; } } catch (e) {}
+      try { const t = await fetchText('areas.json'); if (t !== lastAreas) { lastAreas = t; areas = JSON.parse(t); changed = true; } } catch (e) {}
+    }
     const txt = await fetchText('events.jsonl');
-    evs = txt.split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
-    roster(cfg, evs);
+    if (txt !== lastTxt || changed) {
+      lastTxt = txt; changed = true;
+      evs = txt.split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+      roster(cfg, evs);
+      render();  // show the log at once; details follow
+    }
     stale = false; $('upd').textContent = hms(Date.now()/1000);
-    $('pulse').className = 'pulse'; render();  // show the log at once; details follow
     const ids = [...new Set(evs.map(e => e.id).filter(Boolean))];
     await Promise.all(ids.map(async id => {
-      if (!(id in queue)) { try { queue[id] = JSON.parse(await fetchText('queue/'+id+'.json')); } catch (e) { queue[id] = {}; } }
-      if (tick % 5 === 0 || !(id in val)) { try { val[id] = await fetchText('val/'+id+'.txt'); } catch (e) { val[id] = val[id] || ''; } }
+      if (!(id in queue)) { changed = true; try { queue[id] = JSON.parse(await fetchText('queue/'+id+'.json')); } catch (e) { queue[id] = {}; } }
+      if (tick % 3 === 0 || !(id in val)) {
+        let v = val[id] || '';
+        try { v = await fetchText('val/'+id+'.txt'); } catch (e) {}
+        if (v !== val[id]) { val[id] = v; changed = true; }
+      }
     }));
   } catch (e) { stale = true; }
   tick++;
   $('pulse').className = 'pulse' + (stale ? ' stale' : '');
-  render();
+  const now = Date.now();
+  if (changed || stale !== wasStale || now - lastFull > 30000) { lastFull = now; render(); }
+  polling = false;
 }
 
 function stateOf() {
@@ -533,7 +567,7 @@ function renderMachine(now) {
     tile('Memory available', big(gib(m.mem_avail), mc), 'MemAvailable from /proc/meminfo: memory that can be used without swapping. Amber under 2 GB, red under 1 GB, when the kernel is close to killing processes. The bar shows memory in use.', mc, 'of ' + gib(m.mem_total)) .replace('</div></div>', `</div><div class="mbar"><i style="width:${100 * used / m.mem_total}%;background:${mc}"></i></div></div>`) +
     tile('Swap used', gib(m.swap_used), 'SwapTotal minus SwapFree from /proc/meminfo. Growing swap means memory is short.', null, 'of ' + gib(m.swap_total)) +
     tile('Load', big(m.load[0].toFixed(2), lc), `1-minute load average from /proc/loadavg against the ${m.cpus} CPUs (5 and 15 minutes: ${m.load[1].toFixed(2)}, ${m.load[2].toFixed(2)}). Amber above the CPU count, red above 1.5 times it.`, lc, '/ ' + m.cpus + ' CPUs') +
-    tile('Test slots', m.slots.length, 'Test runs share these slots (slots/count); each runs under a memory cap. A run holds slots/<n>.json until it ends; one whose process is gone counts as free.', 'var(--violet)', '/ ' + m.slot_count + ' busy');
+    tile('Test slots', m.slots.length, 'A slot is a permit to run the test suite: at most this many test runs (by devs and their commit-reviewers) go at once, and any other run waits until a slot frees up. Each run is memory-capped. Busy slots with load below the CPU count mean the machine has room: raise the number in slots/count, which applies to runs that start afterwards.', 'var(--violet)', '/ ' + m.slot_count + ' busy');
   const rows = [];
   for (let n = 1; n <= m.slot_count; n++) {
     const j = m.slots.find(x => x.slot === n);
@@ -543,6 +577,28 @@ function renderMachine(now) {
   $('slots').innerHTML = rows.join('');
   $('machbadge').textContent = `${gib(m.mem_avail)} avail · load ${m.load[0].toFixed(2)}/${m.cpus} · ${m.slots.length}/${m.slot_count} slots`;
   $('machbadge').style.color = m.mem_avail < 2 * GIB ? mc : m.load[0] > m.cpus ? lc : '';
+}
+
+// A reviewer's expanded row: the area it was given (areas.json) and every finding it reported.
+function revDetail(r, ids, findings) {
+  const list = ids.map(i => {
+    const f = findings[i], gone = ['invalid','duplicate'].includes(f.state), sev = f.sev || '?', lab = STATE[f.state]?.[0] || f.state;
+    const tip = gone ? `<b>${tesc(i)}</b> — ${tesc(lab)}<br>${tesc(f.hist.slice(-1)[0]?.msg || STATE[f.state][1])}<br>It left the pipeline table.`
+      : `<b>${tesc(i)}</b> — ${tesc(lab)}<br>${tesc(f.title)}<br><span class='muted'>click to open it in the findings pipeline</span>`;
+    return `<div class="rfind${gone ? ' gone' : ''}"${gone ? '' : ` data-goto="${esc(i)}"`} data-tip="${tip}"><span class="sev"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span><span class="id">${esc(i)}</span><span class="lab">${esc(lab)}</span><span class="title">${esc(f.title)}</span></div>`;
+  }).join('');
+  return `<div class="rdetail">
+    <div class="dblock" data-tip="<b>Area</b><br>What this reviewer was told to cover and which question to ask of it, from areas.json in the swarm folder. The dispatcher writes that file when it starts the reviewers."><h4>Area <span class="help">?</span></h4><p>${areas[r] ? esc(areas[r]) : `<span class="muted">not recorded: areas.json in the swarm folder has no entry for ${r}</span>`}</p></div>
+    <div class="dblock" data-tip="<b>Findings by ${r}</b><br>Every finding this reviewer reported, in the order reported, with the coordinator's severity and where it stands. Click one to open it in the findings pipeline; rejected ones are dimmed."><h4>Findings (${ids.length}) <span class="help">?</span></h4>${list || '<span class="muted">none reported yet</span>'}</div></div>`;
+}
+
+function gotoFinding(id) {
+  $('main').classList.remove('focus'); document.querySelectorAll('section').forEach(s => s.classList.remove('focused'));
+  $('pipeline').classList.remove('collapsed'); store.set('collapsed.pipeline', false);
+  openRows.add(id); store.set('open', [...openRows]);
+  flash = {id, until: Date.now() + 2500}; render();
+  document.querySelector(`.prow[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block: 'center', behavior: 'smooth'});
+  setTimeout(render, 2600);
 }
 
 function render() {
@@ -562,7 +618,7 @@ function render() {
   const devbusy = DEVS.filter(d => agents[d]?.busy).length;
   $('tiles').innerHTML =
     tile('Reviews done', revdone, `Reviewers R1..R${REVIEWERS.length} each audit one area of the tree, read-only. A review is done when the reviewer reported its last finding and finished.`, 'var(--good)', '/ ' + REVIEWERS.length) +
-    tile('Findings', all.length, 'Problems reported by reviewers, each a queue/<id>.json. Includes ones the coordinator later rejected.', null) +
+    tile('Findings', all.length, 'Problems reported by reviewers, one file each in the queue folder. Includes ones the coordinator later rejected.', null) +
     tile('Agreed', done, 'The dev\'s fix passed its own commit-reviewer loop and the coordinator confirmed it meets the validation. Merged into swarm-review.', 'var(--good)') +
     tile('In pipeline', pipe, 'Validated findings not yet agreed: queued for a dev, being fixed, or being checked.', 'var(--violet)') +
     tile('Rejected', rej, 'The coordinator judged the finding invalid or a duplicate; nothing to fix.', 'var(--ink-3)') +
@@ -584,10 +640,11 @@ function render() {
 
   // Agents
   $('reviewers').innerHTML = (REVIEWERS.length ? '' : '<div class="empty" data-tip="<b>No reviewers</b><br>swarm.json names none and none has written to the log yet.">no reviewers yet</div>') + REVIEWERS.map(r => {
-    const st = agents[r];
+    const st = agents[r], open = openRevs.has(r);
     const cls = !st ? '' : st.done ? 'done' : 'busy';
-    return `<div class="arow" data-tip="<b>${r}</b> — ${tesc(focus[r] || 'no focus reported')}<br>${st ? (st.done ? 'Finished. ' : 'Working. ') + 'Reported ' + st.n + ' finding' + (st.n === 1 ? '' : 's') + '.<br>Last: ' + tesc(st.msg) : 'Not started.'}">
-      <span class="state ${cls}"></span><span class="name a-R">${r} <span class="n">⚑${st?.n || 0}</span></span><span class="focusarea">${esc(focus[r] || '')}</span><span class="age">${st ? ago(st.t, now) : ''}</span></div>`;
+    return `<div class="arow rev${open ? ' open' : ''}" data-rev="${r}" data-tip="<b>${r}</b> — ${tesc(focus[r] || 'no focus reported')}<br>${st ? (st.done ? 'Finished. ' : 'Working. ') + 'Reported ' + st.n + ' finding' + (st.n === 1 ? '' : 's') + '.<br>Last: ' + tesc(st.msg) : 'Not started.'}<br><span class='muted'>click to ${open ? 'close' : 'open'} its area and findings</span>">
+      <span class="state ${cls}"></span><span class="name a-R">${r} <span class="n">⚑${st?.n || 0}</span></span><span class="focusarea">${esc(focus[r] || '')}</span><span class="age">${st ? ago(st.t, now) : ''}</span></div>` +
+      (open ? revDetail(r, order.filter(i => findings[i].by === r), findings) : '');
   }).join('');
   $('team').innerHTML = ['coordinator', ...DEVS].map(a => {
     const st = agents[a] || {msg: DEVS.includes(a) ? 'not started' : 'waiting', t: now, busy: false, fid: ''};
@@ -609,7 +666,7 @@ function render() {
       : f.state === 'dev' && f.dev ? `<span class="${acls(f.dev)}">${esc(f.dev)} fixing</span>` : esc(lab);
     const sev = f.sev || '?';
     const open = openRows.has(i);
-    return `<tr class="prow${open ? ' open' : ''}" data-id="${esc(i)}" data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[f.state]?.[0] || f.state)}<br>${tesc(ltip)}<br><span class='muted'>click to ${open ? 'close' : 'open'} the full finding</span>">
+    return `<tr class="prow${open ? ' open' : ''}${flash.id === i && Date.now() < flash.until ? ' flash' : ''}" data-id="${esc(i)}" data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[f.state]?.[0] || f.state)}<br>${tesc(ltip)}<br><span class='muted'>click to ${open ? 'close' : 'open'} the full finding</span>">
       <td><span class="sev" data-tip="<b>${tesc(sev)}</b><br>${f.sev ? 'The coordinator rated this finding ' + tesc(sev) + ' when it validated it (scale in severity.md).' : 'Not validated yet: the coordinator has not rated it.'}"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span></td>
       <td class="id">${esc(i)}</td><td>${track(f)}</td><td class="lab">${label}</td>
       <td class="round">${f.round ? `<span data-tip="<b>Round ${f.round} of 4</b><br>Handed to a dev ${f.round} time${f.round === 1 ? '' : 's'}. After 4 rounds without agreement the finding becomes unresolved.">r${f.round}/4</span>` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
@@ -626,7 +683,7 @@ function render() {
   let rows = evs.filter(e => (!fa || e.agent === fa) && (!ft || (e.id + ' ' + e.msg + ' ' + e.kind).toLowerCase().includes(ft)));
   const total = rows.length;
   if (!$('fall').checked) rows = rows.slice(-150);
-  const fhead = `<div class="frow fhead"><span data-tip="<b>Time</b><br>When the event was written, in this browser's time zone.">time</span><span data-tip="<b>Agent</b><br>Who wrote the event: R&lt;n&gt; reviewers, coordinator, dev&lt;n&gt;, dispatcher.">agent</span><span data-tip="<b>Kind</b><br>What sort of event it is; hover a row for its meaning.">kind</span><span data-tip="<b>Id</b><br>The finding the event is about, if any.">id</span><span data-tip="<b>Message</b><br>Free text from the agent.">message</span></div>`;
+  const fhead = `<div class="frow fhead"><span data-tip="<b>Time</b><br>When the event was written, in this browser's time zone.">time</span><span data-tip="<b>Agent</b><br>Who wrote the event: a reviewer (R1, R2, …), the coordinator, a dev (dev1, dev2, …) or the dispatcher.">agent</span><span data-tip="<b>Kind</b><br>What sort of event it is; hover a row for its meaning.">kind</span><span data-tip="<b>Id</b><br>The finding the event is about, if any.">id</span><span data-tip="<b>Message</b><br>Free text from the agent.">message</span></div>`;
   $('feed').innerHTML = fhead + (rows.length ? '' : '<div class="empty" data-tip="<b>No events</b><br>Nothing in events.jsonl matches, or the swarm has not written its first event yet.">no matching events</div>') + rows.slice().reverse().map(e => `<div class="frow k-${esc(e.kind)}" data-tip="<b>${tesc(e.kind)}</b> · ${tesc(e.agent)}${e.id ? ' · ' + tesc(e.id) : ''} · ${hms(e.t)}<br>${tesc(kindTip(e.kind))}"><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span class="kind${e.kind === 'phase' ? ' ph-' + phaseKind(e.msg) : ''}">${esc(e.kind)}</span><span class="id">${esc(e.id)}</span><span class="msg">${esc(e.msg)}</span></div>`).join('');
   $('livebadge').textContent = `${rows.length}${total > rows.length ? ' of ' + total : ''} events`;
 }
@@ -652,6 +709,12 @@ $('rows').addEventListener('click', e => {
   openRows.has(r.dataset.id) ? openRows.delete(r.dataset.id) : openRows.add(r.dataset.id);
   store.set('open', [...openRows]); render();
 });
+$('reviewers').addEventListener('click', e => {
+  const g = e.target.closest('[data-goto]'); if (g) return gotoFinding(g.dataset.goto);
+  const r = e.target.closest('.arow.rev'); if (!r) return;
+  openRevs.has(r.dataset.rev) ? openRevs.delete(r.dataset.rev) : openRevs.add(r.dataset.rev);
+  store.set('openrev', [...openRevs]); render();
+});
 $('openall').addEventListener('click', () => { document.querySelectorAll('.prow').forEach(r => openRows.add(r.dataset.id)); store.set('open', [...openRows]); render(); });
 $('closeall').addEventListener('click', () => { openRows.clear(); store.set('open', []); render(); });
 ['fagent','ftext','fall'].forEach(id => $(id).addEventListener('input', render));
@@ -675,7 +738,8 @@ document.addEventListener('mousemove', e => { if (tipEl) moveTip(e.clientX, e.cl
 document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el); });
 document.addEventListener('focusout', () => { tipEl = null; tip.classList.remove('on'); });
 
-poll(); setInterval(poll, 2000);
+poll(); setInterval(poll, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 </script>
 </body>
 </html>
