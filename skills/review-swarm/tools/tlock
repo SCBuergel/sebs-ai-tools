@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# tlock COMMAND...: run a test command in one of the swarm's test slots.
+#
+# Waits for a free slot (the number is in slots/count, or SWARM_TEST_SLOTS), runs the command under a
+# memory cap (SWARM_TEST_MEM, default 2G, through systemd-run; without systemd-run the command runs
+# uncapped and a warning says so) and records the holder in slots/<n>.json for the dashboards.
+# Every agent starts every test run through this, so at most <count> runs share the machine.
+set -u
+S=$(dirname "$(realpath "$0")")
+N=${SWARM_TEST_SLOTS:-$(cat "$S/slots/count" 2>/dev/null || echo 1)}
+MEM=${SWARM_TEST_MEM:-2G}
+run() {
+	if command -v systemd-run >/dev/null; then
+		systemd-run --user --scope -q -p MemoryMax="$MEM" "$@"
+	else
+		echo "tlock: systemd-run not found, running without a memory cap" >&2
+		"$@"
+	fi
+}
+while :; do
+	for i in $(seq 1 "$N"); do
+		f="$S/test.lock"; [ "$i" -eq 1 ] || f="$S/test.lock.$i"
+		exec {fd}>"$f"
+		if flock -n "$fd"; then
+			printf '{"slot": %d, "pid": %d, "start": %d, "cwd": "%s", "cmd": "%s"}\n' \
+				"$i" $$ "$(date +%s)" "$PWD" "$*" > "$S/slots/$i.json"
+			run "$@"; rc=$?
+			rm -f "$S/slots/$i.json"; exit "$rc"
+		fi
+		exec {fd}>&-
+	done
+	sleep 3
+done

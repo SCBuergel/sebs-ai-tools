@@ -11,20 +11,28 @@
       "name": "write-clear-explainers",
       "source": "./skills/write-clear-explainers",
       "strict": false,
-      "skills": ["./"],
+      "skills": [
+        "./"
+      ],
       "version": "0.6.1",
       "description": "Write and review technical explainers for readers who are technical but new to the system.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": {
+        "name": "Sebastian C. Bürgel"
+      },
       "license": "MIT"
     },
     {
       "name": "test-gnosis-vpn",
       "source": "./skills/test-gnosis-vpn",
       "strict": false,
-      "skills": ["./"],
+      "skills": [
+        "./"
+      ],
       "version": "0.5.1",
       "description": "Install, fund and test the latest Gnosis VPN client on a remote Linux server over SSH without locking yourself out, from a throwaway VM to returning its funds.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": {
+        "name": "Sebastian C. Bürgel"
+      },
       "license": "MIT"
     },
     {
@@ -33,17 +41,37 @@
       "strict": false,
       "version": "0.1.1",
       "description": "Independent read-only reviewer agent: give it a commit range and it answers APPROVED or NOT APPROVED with findings, after reading the repository's AI guide and running its tests.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": {
+        "name": "Sebastian C. Bürgel"
+      },
       "license": "MIT"
     },
     {
       "name": "review-loop",
       "source": "./skills/review-loop",
       "strict": false,
-      "skills": ["./"],
+      "skills": [
+        "./"
+      ],
       "version": "0.1.1",
       "description": "Send the latest local commits to the reviewer session running next to this one, fix its findings, resubmit, and push only on APPROVED.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": {
+        "name": "Sebastian C. Bürgel"
+      },
+      "license": "MIT"
+    },
+    {
+      "name": "review-swarm",
+      "source": "./skills/review-swarm",
+      "strict": false,
+      "skills": [
+        "./"
+      ],
+      "version": "0.1.0",
+      "description": "Run a review swarm: reviewer agents audit one area each, a coordinator validates their findings, devs fix them in parallel in their own worktrees with their own commit-reviewers, watched on a terminal and a web dashboard.",
+      "author": {
+        "name": "Sebastian C. Bürgel"
+      },
       "license": "MIT"
     }
   ]

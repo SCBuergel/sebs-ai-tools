@@ -19,6 +19,7 @@ same name, so you install only what you want.
 | `write-clear-explainers` | Writes and reviews technical explainers and mixed explanation/procedure docs for readers who are technical but new to the system. |
 | `test-gnosis-vpn` | Installs, funds and tests the latest Gnosis VPN client on a remote Linux server over SSH, or on a throwaway DigitalOcean VM that it destroys afterwards, after sending the funds back. It measures download speed and ping per second, or checks every exit. It runs commands as root on that server, changes its routes and firewall rules, and starts a watchdog on it: if the heartbeat you send over SSH stops for 6 minutes, the watchdog tears the VPN down, and after 12 minutes it reboots the server once. |
 | `review-loop` | Gets everything not pushed yet reviewed by the `commit-reviewer` agent: fixes the findings it returns, resubmits to the same reviewer so that it remembers earlier rounds, and pushes only on `APPROVED`, for at most four rounds. |
+| `review-swarm` | Makes the session the dispatcher of a swarm: reviewer agents audit one area of the repository each, a coordinator validates and rates their findings, and dev agents fix them in parallel in their own git worktrees, each fix reviewed by the dev's own `commit-reviewer`. Ships the briefs for every role, a shared event log, a test-slot lock, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
 
 | Agent | What it does |
 | --- | --- |
@@ -35,6 +36,7 @@ claude plugin install write-clear-explainers@sebs-ai-tools
 claude plugin install test-gnosis-vpn@sebs-ai-tools
 claude plugin install review-loop@sebs-ai-tools
 claude plugin install commit-reviewer@sebs-ai-tools
+claude plugin install review-swarm@sebs-ai-tools
 ```
 
 Inside a running Claude Code session, use the same commands with `/plugin`
@@ -54,6 +56,7 @@ share a name, the name appears twice:
 /write-clear-explainers:write-clear-explainers
 /test-gnosis-vpn:test-gnosis-vpn
 /review-loop:review-loop
+/review-swarm:review-swarm
 ```
 
 ## Get your commits reviewed
@@ -90,6 +93,40 @@ claude --agent commit-reviewer:commit-reviewer
 
 Tell it to review, with or without a range; it prints the verdict there.
 
+## Run a review swarm
+
+The `review-swarm` skill scales a review across many agents. Install it
+together with `review-loop` and `commit-reviewer`, which its devs use. In a
+session at the repository, on a clean checkout of the branch to review, ask
+for it: "run a review swarm for the security of this repository", or
+`/review-swarm:review-swarm`. That session becomes the dispatcher. It:
+
+1. sizes the swarm from the machine's CPUs (the limit is test runs, not
+   memory), splits the task into areas, and runs `swarm-init`, which creates a
+   swarm folder with the tools and the protocol, branch `swarm-review`, a
+   read-only worktree of the starting point, and one worktree per dev;
+2. starts the reviewers (read-only, one area each) and the coordinator
+   (read-only; validates each finding against the code, rates it, and later
+   checks each fix), then the devs;
+3. passes messages between them and records every state change in the swarm
+   folder's log, without judging a finding itself. Each dev fixes one finding
+   at a time in its worktree, runs `review-loop` on it, and on `APPROVED`
+   fast-forwards `swarm-review`; nobody pushes;
+4. when every finding is agreed, has the whole range reviewed once more by one
+   `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
+   your rules allow, and cleans the worktrees up.
+
+You watch it live. In a terminal, `python3 $SW/dash.py` shows the agents,
+the findings pipeline (reported, validated, dev, coordinator, agreed), each
+dev's review-loop step, machine memory and load, and the event feed; `python3
+$SW/dashweb.py` serves the same as a web page on http://127.0.0.1:8765/ with
+expandable findings and tooltips. `$SW` is the swarm folder the session names.
+You can also talk to any agent directly, for example to ask the optional
+`dash` agent for a change to the dashboards.
+
+The swarm is file-based: if the dispatcher session ends, a new session can
+take over from the folder, as the skill describes.
+
 ## Update or remove a plugin
 
 To get the latest version, refresh the marketplace listing, then update the
@@ -115,6 +152,7 @@ claude plugin marketplace remove sebs-ai-tools
 ```text
 .claude-plugin/marketplace.json    the marketplace: one plugin entry per skill or agent
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
+                                   (review-swarm: roles/ briefs, tools/ scripts)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
 evals/<skill-name>/<case>/         optional test cases for a skill

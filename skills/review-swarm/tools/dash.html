@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Swarm</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #121211; --surface: #1a1a19; --surface-2: #232322; --line: #2e2e2c; --line-2: #3a3a37;
+  --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8a897f;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --blue: #3987e5; --orange: #d95926; --aqua: #199e70; --yellow: #c98500; --magenta: #d55181;
+  --violet: #9085e9; --red: #e66767;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Inter", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
+a { color: var(--blue); text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* Top bar */
+.top { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  padding: 10px 16px; background: linear-gradient(180deg, #1c1830, #141320); border-bottom: 1px solid var(--line); }
+.top h1 { font-size: 15px; letter-spacing: .14em; margin: 0; font-weight: 600; display: flex; gap: 10px; align-items: center; }
+.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(12,163,12,.6); animation: pulse 1.6s infinite; }
+.pulse.stale { background: var(--serious); animation: none; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,.55);} 70% { box-shadow: 0 0 0 8px rgba(12,163,12,0);} 100% { box-shadow: 0 0 0 0 rgba(12,163,12,0);} }
+.top .meta { color: var(--ink-2); display: flex; gap: 14px; flex-wrap: wrap; }
+.top nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.top nav button, .top nav a { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--ink-2); font-size: 12.5px; }
+.top nav button:hover, .top nav a:hover { color: var(--ink); border-color: var(--ink-3); }
+
+main { padding: 12px 16px 40px; display: grid; gap: 12px; max-width: 1500px; margin: 0 auto; }
+
+/* Sections */
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+section > header { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; user-select: none;
+  background: var(--surface-2); border-bottom: 1px solid var(--line); }
+section > header:hover { background: #282826; }
+section > header h2 { margin: 0; font-size: 13px; letter-spacing: .1em; font-weight: 600; text-transform: uppercase; color: var(--ink-2); }
+section.collapsed > header { border-bottom: 0; }
+section.collapsed > .body { display: none; }
+.chev { display: inline-block; width: 14px; color: var(--ink-3); transition: transform .15s; }
+section.collapsed .chev { transform: rotate(-90deg); }
+.badge:empty { display: none; }
+.badge { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 10px; background: var(--line-2); color: var(--ink-2); }
+.help { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ink-3); color: var(--ink-3); font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center; }
+.help:hover, [data-tip]:hover > .help { border-color: var(--violet); color: var(--violet); }
+.hdr-tools { margin-left: auto; display: flex; gap: 6px; }
+.hdr-tools button { color: var(--ink-3); padding: 2px 7px; border-radius: 5px; font-size: 12px; }
+.hdr-tools button:hover { color: var(--ink); background: var(--line-2); }
+main.focus section:not(.focused) { display: none; }
+.body { padding: 12px; }
+
+/* Overview */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.tile { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.tile .k { color: var(--ink-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; display: flex; gap: 6px; align-items: center; }
+.tile .v { font-size: 26px; font-weight: 600; font-family: var(--mono); margin-top: 2px; display: flex; align-items: baseline; gap: 6px; }
+.tile .v small { font-size: 13px; color: var(--ink-3); font-weight: 400; }
+.tile .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.progress { margin-top: 12px; display: grid; gap: 6px; }
+.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; }
+.bar .agreed { background: var(--good); }
+.bar .pipe { background: var(--violet); opacity: .55; }
+.bar .unres { background: var(--critical); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 12.5px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+.chip { display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px; border-radius: 6px; font-size: 12.5px;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); }
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+.note { margin-top: 12px; padding: 8px 10px; border-left: 3px solid var(--violet); background: var(--surface-2); border-radius: 0 6px 6px 0; color: var(--ink-2); font-style: italic; }
+.note b { color: var(--ink); font-style: normal; }
+
+/* Agents */
+.agents { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 900px) { .agents { grid-template-columns: 1fr; } }
+.alist { display: grid; gap: 4px; }
+.arow { display: grid; grid-template-columns: 16px 86px 1fr auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); }
+.arow.team { grid-template-columns: 16px 110px 64px auto 1fr auto; }
+.arow .name { font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+.arow .focusarea { color: var(--ink-2); font-size: 12px; }
+.arow .msg { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arow .age { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
+.arow .fid { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.arow .n { font-family: var(--mono); font-size: 11.5px; color: var(--yellow); }
+.state { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--line-2); }
+.state.done { background: var(--good); }
+.state.busy { background: var(--yellow); animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+.sub { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
+
+/* Pipeline */
+.stages { display: flex; gap: 0; align-items: center; color: var(--ink-3); font-size: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.stages span { padding: 2px 6px; border-radius: 4px; }
+.stages span:hover { background: var(--line-2); color: var(--ink); }
+.stages em { font-style: normal; color: var(--line-2); }
+.ptable { width: 100%; border-collapse: collapse; }
+.ptable th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); padding: 4px 8px; border-bottom: 1px solid var(--line); font-weight: 500; }
+.ptable td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.prow { cursor: pointer; }
+.prow:hover td { background: var(--surface-2); }
+.prow.open td { background: var(--surface-2); border-bottom: 0; }
+.sev { display: inline-flex; gap: 5px; align-items: center; font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line-2); white-space: nowrap; }
+.sev .dot { width: 8px; height: 8px; border-radius: 50%; }
+.id { font-family: var(--mono); font-weight: 600; }
+.track { display: inline-flex; align-items: center; gap: 0; }
+.track .d { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--line-2); display: inline-block; }
+.track .d.done { background: var(--good); border-color: var(--good); }
+.track .d.cur { background: var(--yellow); border-color: var(--yellow); animation: blink 1.2s infinite; }
+.track .d.bad { background: var(--critical); border-color: var(--critical); }
+.track .l { width: 12px; height: 2px; background: var(--line-2); display: inline-block; }
+.track .l.done { background: var(--good); }
+.lab { font-size: 12.5px; white-space: nowrap; }
+.round { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+.title { color: var(--ink-2); }
+.prow.open .title { color: var(--ink); }
+.detail td { padding: 0 8px 12px 8px; background: var(--surface-2); }
+.dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 1000px) { .dgrid { grid-template-columns: 1fr; } }
+.dblock { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.dblock h4 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 500; display: flex; gap: 6px; align-items: center; }
+.dblock p { margin: 0; white-space: pre-wrap; color: var(--ink-2); max-height: 260px; overflow: auto; }
+.dblock p.verdict { color: var(--ink); }
+.hist { display: grid; gap: 4px; }
+.hist div { display: grid; grid-template-columns: 62px 170px 1fr; gap: 8px; font-size: 12.5px; }
+.hist .t { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
+.loc { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.muted { color: var(--ink-3); }
+.rejected { margin-top: 10px; color: var(--ink-3); font-size: 12.5px; }
+.rejected span { cursor: pointer; text-decoration: underline dotted; }
+
+/* Live */
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+.filters select, .filters input { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12.5px; }
+.feed { font-family: var(--mono); font-size: 12.5px; display: grid; gap: 1px; max-height: 60vh; overflow: auto; }
+html, .feed { scrollbar-color: var(--line-2) var(--surface); }
+.frow { display: grid; grid-template-columns: 64px 92px 86px 56px 1fr; gap: 10px; padding: 3px 6px; border-radius: 4px; }
+.frow:hover { background: var(--surface-2); }
+.frow .t { color: var(--ink-3); }
+.frow .kind { color: var(--ink-3); }
+.frow .msg { color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.frow.k-reported .kind, .frow.k-valid .kind, .frow.k-agreed .kind, .frow.k-done .kind { color: var(--good); }
+.frow.k-invalid .kind, .frow.k-duplicate .kind { color: var(--ink-3); }
+.frow.k-unresolved .kind { color: var(--critical); }
+.frow.k-note .kind { color: var(--violet); }
+.frow.k-dev .kind { color: var(--yellow); }
+.frow .kind.ph-dev { color: var(--yellow); } .frow .kind.ph-review { color: var(--blue); }
+.frow .kind.ph-approved { color: var(--good); } .frow .kind.ph-blocked { color: var(--critical); }
+
+/* Review-loop phase: a DEV / REVIEW pill and the chain of steps */
+.pill { font: 600 10.5px var(--mono); letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; color: #111; white-space: nowrap; }
+.pill.ph-dev, .chain .cur.ph-dev { background: var(--yellow); }
+.pill.ph-review, .chain .cur.ph-review { background: var(--blue); color: #fff; }
+.pill.ph-approved, .chain .cur.ph-approved { background: var(--good); color: #fff; }
+.pill.ph-blocked, .chain .cur.ph-blocked { background: var(--critical); color: #fff; }
+.chain { font: 11.5px var(--mono); color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 2px 5px; align-items: center; }
+.chain .sep { color: var(--line-2); }
+.chain .cur { color: #111; padding: 0 5px; border-radius: 4px; font-weight: 600; }
+.arow.team .loop { grid-column: 2 / -1; }
+.title .chain { margin-top: 3px; }
+.track .d.cur.review { background: var(--blue); border-color: var(--blue); }
+
+/* Tooltip */
+#tip { position: fixed; z-index: 50; max-width: 340px; padding: 8px 10px; border-radius: 7px; background: #0c0c14; color: var(--ink);
+  border: 1px solid var(--violet); box-shadow: 0 6px 24px rgba(0,0,0,.5); font-size: 12.5px; line-height: 1.4; pointer-events: none;
+  opacity: 0; transition: opacity .1s; }
+#tip.on { opacity: 1; }
+#tip b { color: var(--violet); }
+[data-tip] { cursor: help; }
+.prow[data-tip], .arow[data-tip], header[data-tip] { cursor: pointer; }
+.a-coordinator { color: var(--blue); } .a-dispatcher { color: var(--violet); }
+/* .a-dev<n> colours are generated by the script for however many devs the swarm has */
+/* Machine */
+.mbar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.mbar i { display: block; height: 100%; }
+.slots { margin-top: 12px; display: grid; gap: 4px; }
+.slot { display: grid; grid-template-columns: 60px 90px 1fr 90px 60px; gap: 10px; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); font: 12.5px var(--mono); align-items: center; }
+.slot .cmd { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot.free { color: var(--ink-3); }
+.a-R { color: #86b6ef; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1><span class="pulse" id="pulse"></span><span id="title">REVIEW SWARM</span></h1>
+  <div class="meta">
+    <span data-tip="<b>Elapsed</b><br>Time since the first event in events.jsonl, i.e. since the swarm started.">⏱ <span id="elapsed">–</span></span>
+    <span data-tip="<b>Events</b><br>Lines in events.jsonl, the shared log every agent appends to with the ev helper.">📜 <span id="nev">–</span> events</span>
+    <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 2 seconds; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
+  </div>
+  <nav>
+    <a href="#overview">Overview</a><a href="#machine">Machine</a><a href="#agents">Agents</a><a href="#pipeline">Pipeline</a><a href="#live">Live</a>
+    <button id="allbtn" data-tip="Show every section again after focusing on one, and expand them all.">⤡ show all</button>
+  </nav>
+</div>
+
+<main id="main">
+  <div id="err" style="display:none;padding:8px 12px;border-radius:8px;background:#3a1414;border:1px solid var(--critical);font-family:var(--mono)"></div>
+  <section id="overview">
+    <header data-tip="<b>Overview</b><br>Where the swarm stands: how many reviews finished, how many findings exist and how far they got. Click to collapse, ⤢ to focus on this section alone.">
+      <span class="chev">▼</span><h2>Overview</h2><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+    </header>
+    <div class="body">
+      <div class="tiles" id="tiles"></div>
+      <div class="progress">
+        <div class="bar" id="bar" data-tip="<b>Progress</b><br>Validated findings by outcome. Green = agreed and merged into swarm-review, violet = still in the pipeline, red = unresolved."></div>
+        <div class="legend"><span><i style="background:var(--good)"></i>agreed</span><span><i style="background:var(--violet);opacity:.55"></i>in pipeline</span><span><i style="background:var(--critical)"></i>unresolved</span><span><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="note" id="note" style="display:none"></div>
+    </div>
+  </section>
+
+  <section id="machine">
+    <header data-tip="<b>Machine</b><br>Memory, swap, CPU load and test slots of this machine, read from /proc and slots/ every 2 seconds, so memory pressure shows before the kernel starts killing processes. Click to collapse, ⤢ to focus on this section alone.">
+      <span class="chev">▼</span><h2>Machine</h2><span class="badge" id="machbadge"></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+    </header>
+    <div class="body">
+      <div class="tiles" id="mtiles"></div>
+      <div class="slots" id="slots"></div>
+    </div>
+  </section>
+
+  <section id="agents">
+    <header data-tip="<b>Agents</b><br>Who is in the swarm and what each is doing right now, from their own status events. Reviewers are read-only auditors; the coordinator judges; only the devs change code.">
+      <span class="chev">▼</span><h2>Agents</h2><span class="badge" id="agentsbadge"></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+    </header>
+    <div class="body agents">
+      <div>
+        <p class="sub" data-tip="<b>Reviewers</b><br>Read-only auditors, one per area of the reviewed tree. Each writes its findings to queue/&amp;lt;id&amp;gt;.json and then finishes. The ⚑ number counts the findings it reported.">Reviewers <span class="help">?</span></p>
+        <div class="alist" id="reviewers"></div>
+      </div>
+      <div>
+        <p class="sub" data-tip="<b>Coordinator and devs</b><br>The coordinator validates findings and later checks each fix, read-only. Devs are the only agents that edit: each fixes one finding at a time in its own worktree, runs the tests in one of the shared test slots, loops with its own commit-reviewer until APPROVED, then fast-forwards swarm-review.">Coordinator and devs <span class="help">?</span></p>
+        <div class="alist" id="team"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pipeline">
+    <header data-tip="<b>Findings pipeline</b><br>Every finding a reviewer reported, how far it got, and who holds it. Click a row to open the full finding: problem, exploit scenario, coordinator verdict and history.">
+      <span class="chev">▼</span><h2>Findings pipeline</h2><span class="badge" id="pipebadge"></span><span class="help">?</span>
+      <div class="hdr-tools"><button id="openall">open all</button><button id="closeall">close all</button><button class="focusbtn" title="focus">⤢</button></div>
+    </header>
+    <div class="body">
+      <div class="stages" id="stages"></div>
+      <table class="ptable">
+        <thead><tr>
+          <th data-tip="<b>Severity</b><br>The coordinator's rating when it validated the finding: Critical, High, Medium, Low or Info. ? means not validated yet.">Sev</th>
+          <th data-tip="<b>Id</b><br>Reviewer name and a running number, e.g. R10-1 is the first finding of reviewer R10.">Id</th>
+          <th data-tip="<b>Stage track</b><br>Five dots: reported → validated → dev → coordinator → agreed. Green are passed, the blinking yellow one is where the finding is now.">Stage</th>
+          <th data-tip="<b>State</b><br>What is happening to the finding right now and who holds it, as recorded by the dispatcher.">State</th>
+          <th data-tip="<b>Round</b><br>How many times a dev was handed this finding. After 4 rounds without agreement it becomes unresolved.">Round</th>
+          <th>Title</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="rejected" id="rejected"></div>
+    </div>
+  </section>
+
+  <section id="live">
+    <header data-tip="<b>Live feed</b><br>The raw event log, newest first: time, agent, kind of event, finding id, message. Use the filters to follow one agent or one finding.">
+      <span class="chev">▼</span><h2>Live feed</h2><span class="badge" id="livebadge"></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+    </header>
+    <div class="body">
+      <div class="filters">
+        <select id="fagent"><option value="">all agents</option></select>
+        <input id="ftext" placeholder="filter text or finding id" size="26">
+        <label class="muted"><input type="checkbox" id="fall"> show all (not just last 150)</label>
+      </div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </section>
+</main>
+<div id="tip"></div>
+<style id="devstyle"></style>
+
+<script>
+'use strict';
+// Roster: counts from swarm.json, plus any R<n> or dev<n> that appears in the log.
+let DEVS = [], REVIEWERS = [];
+const DEV_COLORS = ['var(--orange)','var(--aqua)','var(--yellow)','var(--magenta)','var(--violet)','var(--red)','var(--serious)','var(--warn)'];
+function roster(cfg, evs) {
+  const devs = new Set(Array.from({length: cfg.devs || 0}, (_, i) => 'dev' + (i + 1)));
+  const revs = new Set(Array.from({length: cfg.reviewers || 0}, (_, i) => 'R' + (i + 1)));
+  for (const a of new Set(evs.map(e => e.agent))) { if (/^dev\d+$/.test(a)) devs.add(a); if (/^R\d+$/.test(a)) revs.add(a); }
+  DEVS = [...devs].sort((a, b) => +a.slice(3) - +b.slice(3)); REVIEWERS = [...revs].sort((a, b) => +a.slice(1) - +b.slice(1));
+  document.getElementById('devstyle').textContent = DEVS.map((d, i) => `.a-${d} { color: ${DEV_COLORS[i % DEV_COLORS.length]}; }`).join('\n');
+  document.getElementById('title').textContent = cfg.title || 'REVIEW SWARM';
+  document.title = cfg.title || 'Review Swarm';
+}
+const SEV = {Critical:'var(--critical)', High:'var(--serious)', Medium:'var(--warn)', Low:'var(--blue)', Info:'var(--ink-3)'};
+const STAGES = [
+  ['reported', 'A reviewer wrote the finding to queue/<id>.json and announced it.'],
+  ['validated', 'The coordinator confirmed the finding is real, rated its severity and wrote val/<id>.txt.'],
+  ['dev', 'A dev fixes it in its own worktree and branch, runs the tests, and loops with its own commit-reviewer until APPROVED, then fast-forwards swarm-review.'],
+  ['coordinator', 'The coordinator checks the merged fix against its validation.'],
+  ['agreed', 'Fix accepted: approved by the dev\'s reviewer and confirmed by the coordinator. Done.'],
+];
+const STATE_STAGE = {reported:0, validating:0, valid:1, dev:2, coord:3, rev:3, agreed:4};
+const STATE = {
+  reported:   ['waiting for coordinator', 'Reported but the coordinator has not looked at it yet.'],
+  validating: ['coordinator validating', 'The coordinator is reading the finding against the code to decide if it is real.'],
+  valid:      ['queued for dev', 'Validated; waiting for a free dev to pick it up.'],
+  invalid:    ['rejected', 'The coordinator judged it not a real problem (or cosmetic). Nothing to fix.'],
+  duplicate:  ['duplicate', 'Same problem as another finding; handled there.'],
+  dev:        ['dev fixing + review loop', 'A dev is fixing it and getting the change approved by its own commit-reviewer.'],
+  coord:      ['coordinator checking fix', 'The fix is merged into swarm-review; the coordinator checks it meets the validation.'],
+  rev:        ['reviewer checking fix', 'The original reviewer is checking the fix.'],
+  agreed:     ['AGREED ✔', 'Fix accepted by the dev\'s reviewer and the coordinator. Done.'],
+  unresolved: ['UNRESOLVED ✘', 'Gave up after 4 rounds or dev and coordinator disagree; needs the user.'],
+};
+// Review-loop steps devs report with `ev devN phase <id> <step>`: a DEV phase (the dev works) or a REVIEW
+// phase (the dev's commit-reviewer has the change); approved and blocked stand apart.
+const phaseKind = s => (s = String(s ?? ''), s.startsWith('review') ? 'review' : ['approved','blocked'].includes(s) ? s : 'dev');
+const PHASE = {
+  dev:      ['DEV', 'DEV phase: the dev is working on the change (implement, test, fix-k after review round k, or merge into swarm-review).'],
+  review:   ['REVIEW', 'REVIEW phase: the dev\'s own commit-reviewer is reviewing the change (review-k = round k).'],
+  approved: ['APPROVED', 'The dev\'s commit-reviewer approved the change; the dev merges it next.'],
+  blocked:  ['BLOCKED', 'The dev is stuck and needs the dispatcher or the user.'],
+};
+const ROLE_TIP = {
+  coordinator: 'Validates findings and checks fixes. Read-only, runs no tests.',
+  dispatcher: 'Passes messages between agents and records state transitions. Never judges a finding.',
+};
+const roleTip = a => ROLE_TIP[a] || `Only devs edit code. ${a} works in its own worktree on branch swarm-${a}, one finding at a time, tests in a shared test slot, and fast-forwards swarm-review once its commit-reviewer says APPROVED.`;
+
+const $ = id => document.getElementById(id);
+window.onerror = (m, src, line) => { const e = $('err'); e.style.display = ''; e.textContent = `dashboard script error: ${m} (line ${line})`; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Text inside data-tip="..." is decoded once by the attribute and then parsed as HTML by the tooltip, so escape it twice.
+const tesc = s => esc(esc(s));
+const ago = (t, now) => { const s = Math.max(0, Math.floor(now - t)); return s < 60 ? s+'s' : s < 3600 ? Math.floor(s/60)+'m' : Math.floor(s/3600)+'h'+String(Math.floor(s%3600/60)).padStart(2,'0')+'m'; };
+const hms = t => new Date(t*1000).toLocaleTimeString([], {hour12:false});
+const acls = a => a.startsWith('R') ? 'a-R' : 'a-'+esc(a);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('swarm.'+k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('swarm.'+k, JSON.stringify(v)); } catch (e) {} },
+};
+
+let evs = [], queue = {}, val = {}, mach = null, cfg = {}, stale = false, tick = 0;
+const openRows = new Set(store.get('open', []));
+
+async function fetchText(p) {
+  const r = await fetch(p + '?t=' + Date.now(), {cache:'no-store'});
+  if (!r.ok) throw new Error(r.status);
+  return r.text();
+}
+
+async function poll() {
+  try {
+    try { mach = JSON.parse(await fetchText('sys.json')); } catch (e) { mach = null; }
+    if (tick % 15 === 0) { try { cfg = JSON.parse(await fetchText('swarm.json')); } catch (e) {} }
+    const txt = await fetchText('events.jsonl');
+    evs = txt.split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+    roster(cfg, evs);
+    stale = false; $('upd').textContent = hms(Date.now()/1000);
+    $('pulse').className = 'pulse'; render();  // show the log at once; details follow
+    const ids = [...new Set(evs.map(e => e.id).filter(Boolean))];
+    await Promise.all(ids.map(async id => {
+      if (!(id in queue)) { try { queue[id] = JSON.parse(await fetchText('queue/'+id+'.json')); } catch (e) { queue[id] = {}; } }
+      if (tick % 5 === 0 || !(id in val)) { try { val[id] = await fetchText('val/'+id+'.txt'); } catch (e) { val[id] = val[id] || ''; } }
+    }));
+  } catch (e) { stale = true; }
+  tick++;
+  $('pulse').className = 'pulse' + (stale ? ' stale' : '');
+  render();
+}
+
+function stateOf() {
+  const agents = {}, focus = {}, findings = {}, order = [], notes = [];
+  for (const e of evs) {
+    const a = e.agent, k = e.kind, i = e.id;
+    if (k === 'focus') { focus[a] = e.msg; continue; }
+    if (k === 'note') { notes.push(e); continue; }
+    const st = agents[a] ||= {msg:'', t:e.t, done:false, n:0, busy:false, fid:''};
+    if (['status','reported','done','idle'].includes(k)) Object.assign(st, {msg:e.msg, t:e.t, fid:i});
+    else if (k === 'phase') Object.assign(st, {t:e.t, fid:i || st.fid});
+    if (a.startsWith('R')) st.done = st.done || k === 'done'; else st.busy = k !== 'idle';
+    if (k === 'reported') st.n++;
+    if (i) {
+      const f = findings[i] ||= {state:'reported', sev:'', title:'', round:0, by:i.split('-')[0], t:e.t, hist:[], last:null, dev:'', steps:[], phases:[]};
+      if (!order.includes(i)) order.push(i);
+      if (k === 'reported') f.title = e.msg;
+      if (k === 'phase') {
+        if (f.steps[f.steps.length-1] !== e.msg) f.steps.push(e.msg);
+        f.phases.push(e); f.dev = a;
+      } else if (a === 'dispatcher' && k in STATE) {
+        f.state = k; f.t = e.t; f.hist.push(e);
+        if (k === 'valid') f.sev = (e.msg || '').split(/\s+/)[0];
+        if (k === 'dev') { f.round++; f.steps = []; f.phases = []; }  // a new hand-off starts a new loop
+      } else if (DEVS.includes(a) || a === 'coordinator' || a.startsWith('R')) {
+        f.last = e; if (DEVS.includes(a)) f.dev = a;
+      }
+    }
+  }
+  return {agents, focus, findings, order, notes};
+}
+
+function tile(k, v, tip, color, small) {
+  return `<div class="tile" data-tip="${tesc(tip)}"><div class="k">${color ? `<span class="dot" style="background:${color}"></span>` : ''}${k}</div><div class="v">${v}${small ? `<small>${small}</small>` : ''}</div></div>`;
+}
+
+// The finding's review-loop steps this round; before any phase event, guess from the dev's own status.
+function stepsOf(f) {
+  if (f.steps.length) return f.steps;
+  if (!f.dev) return [];
+  return f.last?.agent === f.dev && /^review/i.test(f.last.msg) ? ['review'] : ['implement'];
+}
+function pill(step) {
+  const k = phaseKind(step);
+  return `<span class="pill ph-${k}" data-tip="<b>${PHASE[k][0]}</b> — ${tesc(step)}<br>${tesc(PHASE[k][1])}">${PHASE[k][0]}</span>`;
+}
+function chain(steps) {
+  return `<span class="chain" data-tip="<b>Review loop</b><br>The dev's steps on this finding in this round, oldest first; the highlighted one is current. implement › test › review-1 › fix-1 › review-2 … › approved › merge.">` +
+    steps.map((s, n) => n === steps.length - 1 ? `<span class="cur ph-${phaseKind(s)}">${esc(s)}</span>` : `<span>${esc(s)}</span>`).join('<span class="sep">›</span>') + '</span>';
+}
+
+function track(f) {
+  const stage = STATE_STAGE[f.state];
+  let h = '';
+  for (let n = 0; n < 5; n++) {
+    let c = 'd';
+    if (stage === undefined) c += f.state === 'unresolved' ? ' bad' : '';
+    else if (n < stage || f.state === 'agreed') c += ' done';
+    else if (n === stage) c += ' cur' + (f.state === 'dev' && phaseKind(stepsOf(f).slice(-1)[0] || '') === 'review' ? ' review' : '');
+    h += `<span class="${c}" data-tip="<b>${STAGES[n][0]}</b><br>${tesc(STAGES[n][1])}"></span>`;
+    if (n < 4) h += `<span class="l${stage !== undefined && (n < stage || f.state === 'agreed') ? ' done' : ''}"></span>`;
+  }
+  return `<span class="track">${h}</span>`;
+}
+
+function detail(id, f) {
+  const q = queue[id] || {}, v = (val[id] || '').trim();
+  const block = (title, tip, body, cls='') => body ? `<div class="dblock"><h4 data-tip="${tesc(tip)}">${title} <span class="help">?</span></h4><p class="${cls}">${esc(body)}</p></div>` : '';
+  const hist = f.hist.map(e => `<div><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(STATE[e.kind]?.[0] || e.kind)}</span><span class="muted">${esc(e.msg)}</span></div>`).join('');
+  const loc = q.file ? `<span class="loc">${esc(q.file)}${q.line ? ':'+esc(q.line) : ''}</span>` : '';
+  return `<tr class="detail"><td colspan="6">
+    <div class="muted" style="margin:4px 0 10px">reported by <b class="a-R">${esc(f.by)}</b> ${loc} ${q.severity ? `· reviewer rated <b>${esc(q.severity)}</b>` : ''} ${f.dev ? `· dev <b class="${acls(f.dev)}">${f.dev}</b>` : ''}</div>
+    <div class="dgrid">
+      ${block('Problem', 'The reviewer\'s description of what is wrong, from queue/'+id+'.json.', q.description)}
+      ${block('Exploit scenario', 'How the reviewer thinks the flaw could be abused or what could go wrong.', q.failure_scenario)}
+      ${block('Suggested fix', 'The reviewer\'s proposal; the dev may choose a different fix.', q.fix || q.suggested_fix)}
+      ${block('Coordinator verdict', 'The coordinator\'s validation from val/'+id+'.txt: valid or not, severity, and what a fix must achieve.', v, 'verdict')}
+      ${f.phases.length ? `<div class="dblock"><h4 data-tip="Every review-loop step the dev reported for this finding in this round, oldest first.">Review loop <span class="help">?</span></h4><div class="hist">${f.phases.map(e => `<div><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span>${pill(e.msg)} <span class="muted">${esc(e.msg)}</span></span></div>`).join('')}</div></div>` : ''}
+      <div class="dblock"><h4 data-tip="Every state change the dispatcher recorded for this finding, oldest first.">History <span class="help">?</span></h4><div class="hist">${hist || '<span class="muted">none yet</span>'}</div></div>
+      ${f.last ? `<div class="dblock"><h4 data-tip="The most recent status an agent reported while holding this finding.">Latest activity <span class="help">?</span></h4><p><b class="${acls(f.last.agent)}">${esc(f.last.agent)}</b>: ${esc(f.last.msg)} <span class="muted">· ${hms(f.last.t)}</span></p></div>` : ''}
+    </div></td></tr>`;
+}
+
+// Machine panel from /sys.json: memory amber under 2 GB available and red under 1 GB; load amber above the CPU
+// count and red above 1.5 times it.
+const GIB = 2 ** 30;
+const gib = b => (b / GIB).toFixed(1) + ' G';
+const memColor = b => b < GIB ? 'var(--critical)' : b < 2 * GIB ? 'var(--warn)' : 'var(--good)';
+const loadColor = (l, c) => l > 1.5 * c ? 'var(--critical)' : l > c ? 'var(--warn)' : 'var(--good)';
+function renderMachine(now) {
+  if (!mach) {
+    $('mtiles').innerHTML = '<span class="muted">No machine data: the server does not serve /sys.json yet (restart dashweb.py).</span>';
+    $('slots').innerHTML = ''; $('machbadge').textContent = ''; return;
+  }
+  const m = mach, used = m.mem_total - m.mem_avail, mc = memColor(m.mem_avail), lc = loadColor(m.load[0], m.cpus);
+  const big = (v, c) => `<span style="color:${c}">${v}</span>`;
+  $('mtiles').innerHTML =
+    tile('Memory available', big(gib(m.mem_avail), mc), 'MemAvailable from /proc/meminfo: memory that can be used without swapping. Amber under 2 GB, red under 1 GB, when the kernel is close to killing processes. The bar shows memory in use.', mc, 'of ' + gib(m.mem_total)) .replace('</div></div>', `</div><div class="mbar"><i style="width:${100 * used / m.mem_total}%;background:${mc}"></i></div></div>`) +
+    tile('Swap used', gib(m.swap_used), 'SwapTotal minus SwapFree from /proc/meminfo. Growing swap means memory is short.', null, 'of ' + gib(m.swap_total)) +
+    tile('Load', big(m.load[0].toFixed(2), lc), `1-minute load average from /proc/loadavg against the ${m.cpus} CPUs (5 and 15 minutes: ${m.load[1].toFixed(2)}, ${m.load[2].toFixed(2)}). Amber above the CPU count, red above 1.5 times it.`, lc, '/ ' + m.cpus + ' CPUs') +
+    tile('Test slots', m.slots.length, 'Test runs share these slots (slots/count); each runs under a memory cap. A run holds slots/<n>.json until it ends; one whose process is gone counts as free.', 'var(--violet)', '/ ' + m.slot_count + ' busy');
+  const rows = [];
+  for (let n = 1; n <= m.slot_count; n++) {
+    const j = m.slots.find(x => x.slot === n);
+    rows.push(j ? `<div class="slot" data-tip="<b>Slot ${n}</b> — ${tesc(j.who)}<br>${tesc(j.cmd)}<br>in ${tesc(j.cwd)}, pid ${tesc(j.pid)}"><span>slot ${n}</span><span class="${acls(String(j.who))}">${esc(j.who)}</span><span class="cmd">${esc(j.cmd)}</span><span class="muted">pid ${esc(j.pid)}</span><span class="muted">${typeof j.start === 'number' ? ago(j.start, now) : ''}</span></div>`
+      : `<div class="slot free" data-tip="<b>Slot ${n}</b><br>Free: no test run holds it."><span>slot ${n}</span><span>free</span><span></span><span></span><span></span></div>`);
+  }
+  $('slots').innerHTML = rows.join('');
+  $('machbadge').textContent = `${gib(m.mem_avail)} avail · load ${m.load[0].toFixed(2)}/${m.cpus} · ${m.slots.length}/${m.slot_count} slots`;
+  $('machbadge').style.color = m.mem_avail < 2 * GIB ? mc : m.load[0] > m.cpus ? lc : '';
+}
+
+function render() {
+  const now = Date.now()/1000;
+  const {agents, focus, findings, order, notes} = stateOf();
+  const t0 = evs.length ? evs[0].t : now;
+  $('elapsed').textContent = ago(t0, now); $('nev').textContent = evs.length;
+
+  // Overview
+  const all = Object.values(findings);
+  const valid = all.filter(f => !['reported','validating','invalid','duplicate'].includes(f.state));
+  const done = all.filter(f => f.state === 'agreed').length;
+  const rej = all.filter(f => ['invalid','duplicate'].includes(f.state)).length;
+  const unres = all.filter(f => f.state === 'unresolved').length;
+  const pipe = valid.length - done - unres;
+  const revdone = REVIEWERS.filter(r => agents[r]?.done).length;
+  const devbusy = DEVS.filter(d => agents[d]?.busy).length;
+  $('tiles').innerHTML =
+    tile('Reviews done', revdone, `Reviewers R1..R${REVIEWERS.length} each audit one area of the tree, read-only. A review is done when the reviewer reported its last finding and finished.`, 'var(--good)', '/ ' + REVIEWERS.length) +
+    tile('Findings', all.length, 'Problems reported by reviewers, each a queue/<id>.json. Includes ones the coordinator later rejected.', null) +
+    tile('Agreed', done, 'The dev\'s fix passed its own commit-reviewer loop and the coordinator confirmed it meets the validation. Merged into swarm-review.', 'var(--good)') +
+    tile('In pipeline', pipe, 'Validated findings not yet agreed: queued for a dev, being fixed, or being checked.', 'var(--violet)') +
+    tile('Rejected', rej, 'The coordinator judged the finding invalid or a duplicate; nothing to fix.', 'var(--ink-3)') +
+    tile('Unresolved', unres, 'Fix failed after 4 dev rounds, or dev and coordinator disagree. Needs the user.', 'var(--critical)') +
+    tile('Devs busy', devbusy, `How many of the ${DEVS.length} devs currently hold a finding (their last event was not "idle").`, 'var(--yellow)', '/ ' + DEVS.length);
+  const pct = n => valid.length ? (100*n/valid.length)+'%' : '0%';
+  $('bar').innerHTML = `<i class="agreed" style="width:${pct(done)}"></i><i class="pipe" style="width:${pct(pipe)}"></i><i class="unres" style="width:${pct(unres)}"></i>`;
+  $('barlabel').textContent = `${done} of ${valid.length} validated findings agreed`;
+  const sevc = {}; valid.forEach(f => sevc[f.sev || '?'] = (sevc[f.sev || '?'] || 0) + 1);
+  $('chips').innerHTML = `<span class="muted" data-tip="<b>Severity</b><br>Coordinator ratings on the Critical/High/Medium/Low/Info scale (severity.md in the swarm folder). Counts validated findings only; rejected ones are excluded.">Severity <span class="help">?</span></span>` +
+    (Object.keys(sevc).length ? Object.keys(SEV).concat('?').filter(s => sevc[s]).map(s =>
+      `<span class="chip" data-tip="<b>${tesc(s)}</b><br>${sevc[s]} validated finding${sevc[s] === 1 ? '' : 's'} rated ${tesc(s)}."><span class="dot" style="background:${SEV[s] || 'var(--line-2)'}"></span>${esc(s)} <b>${sevc[s]}</b></span>`).join('')
+    : '<span class="muted">none confirmed yet</span>');
+  const n = notes[notes.length-1];
+  $('note').style.display = n ? '' : 'none';
+  if (n) { $('note').innerHTML = `<b>▶ ${esc(n.agent)}</b> ${esc(n.msg)} <span class="muted">· ${ago(n.t, now)} ago</span>`; $('note').dataset.tip = '<b>Latest note</b><br>Free-text narration; usually the dispatcher explaining a decision or a change in the swarm.'; }
+
+  renderMachine(now);
+
+  // Agents
+  $('reviewers').innerHTML = REVIEWERS.map(r => {
+    const st = agents[r];
+    const cls = !st ? '' : st.done ? 'done' : 'busy';
+    return `<div class="arow" data-tip="<b>${r}</b> — ${tesc(focus[r] || 'no focus reported')}<br>${st ? (st.done ? 'Finished. ' : 'Working. ') + 'Reported ' + st.n + ' finding' + (st.n === 1 ? '' : 's') + '.<br>Last: ' + tesc(st.msg) : 'Not started.'}">
+      <span class="state ${cls}"></span><span class="name a-R">${r} <span class="n">⚑${st?.n || 0}</span></span><span class="focusarea">${esc(focus[r] || '')}</span><span class="age">${st ? ago(st.t, now) : ''}</span></div>`;
+  }).join('');
+  $('team').innerHTML = ['coordinator', ...DEVS].map(a => {
+    const st = agents[a] || {msg: DEVS.includes(a) ? 'not started' : 'waiting', t: now, busy: false, fid: ''};
+    const f = st.fid && findings[st.fid];
+    const steps = DEVS.includes(a) && st.busy && f ? stepsOf(f) : [];
+    return `<div class="arow team" data-tip="<b>${a}</b><br>${tesc(roleTip(a))}${st.fid ? '<br>Holding <b>'+tesc(st.fid)+'</b>' + (f ? ': ' + tesc(f.title) : '') : ''}<br>Last: ${tesc(st.msg)}">
+      <span class="state ${st.busy ? 'busy' : ''}"></span><span class="name ${acls(a)}">${a}</span><span class="fid">${esc(st.fid || '')}</span><span>${steps.length ? pill(steps[steps.length-1]) : ''}</span><span class="msg">${esc(st.msg)}</span><span class="age">${ago(st.t, now)}</span>${steps.length ? `<span class="loop">${chain(steps)}</span>` : ''}</div>`;
+  }).join('');
+  const inrev = DEVS.filter(d => agents[d]?.busy && findings[agents[d].fid] && phaseKind(stepsOf(findings[agents[d].fid]).slice(-1)[0] || '') === 'review').length;
+  $('agentsbadge').textContent = `${revdone}/${REVIEWERS.length} reviews · ${devbusy}/${DEVS.length} devs busy · ${inrev} in review`;
+
+  // Pipeline
+  $('stages').innerHTML = STAGES.map((s, i) => `<span data-tip="<b>${s[0]}</b><br>${tesc(s[1])}">${i+1}. ${s[0]}</span>${i < 4 ? '<em>──▶</em>' : ''}`).join('');
+  const active = order.filter(i => !['invalid','duplicate'].includes(findings[i].state));
+  $('rows').innerHTML = active.map(i => {
+    const f = findings[i], [lab, ltip] = STATE[f.state] || [f.state, ''];
+    const steps = f.state === 'dev' ? stepsOf(f) : [];
+    const label = steps.length ? `<span class="${acls(f.dev)}">${esc(f.dev)}</span> ${pill(steps[steps.length-1])} ${esc(steps[steps.length-1])}`
+      : f.state === 'dev' && f.dev ? `<span class="${acls(f.dev)}">${esc(f.dev)} fixing</span>` : esc(lab);
+    const sev = f.sev || '?';
+    const open = openRows.has(i);
+    return `<tr class="prow${open ? ' open' : ''}" data-id="${esc(i)}" data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[f.state]?.[0] || f.state)}<br>${tesc(ltip)}<br><span class='muted'>click to ${open ? 'close' : 'open'} the full finding</span>">
+      <td><span class="sev"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span></td>
+      <td class="id">${esc(i)}</td><td>${track(f)}</td><td class="lab">${label}</td>
+      <td class="round">${f.round ? `r${f.round}/4` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
+  }).join('');
+  $('pipebadge').textContent = `${active.length} active · ${done} agreed`;
+  const gone = order.filter(i => ['invalid','duplicate'].includes(findings[i].state));
+  $('rejected').innerHTML = gone.length ? 'rejected: ' + gone.map(i => `<span data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[findings[i].state][0])}<br>${tesc(findings[i].title)}<br><i>${tesc(findings[i].hist.slice(-1)[0]?.msg || '')}</i>">${esc(i)}</span>`).join(', ') : '';
+
+  // Live
+  const sel = $('fagent');
+  const names = [...new Set(evs.map(e => e.agent))].sort();
+  if (sel.options.length !== names.length + 1) { const cur = sel.value; sel.innerHTML = '<option value="">all agents</option>' + names.map(a => `<option>${esc(a)}</option>`).join(''); sel.value = cur; }
+  const fa = sel.value, ft = $('ftext').value.toLowerCase();
+  let rows = evs.filter(e => (!fa || e.agent === fa) && (!ft || (e.id + ' ' + e.msg + ' ' + e.kind).toLowerCase().includes(ft)));
+  const total = rows.length;
+  if (!$('fall').checked) rows = rows.slice(-150);
+  $('feed').innerHTML = rows.slice().reverse().map(e => `<div class="frow k-${esc(e.kind)}"><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span class="kind${e.kind === 'phase' ? ' ph-' + phaseKind(e.msg) : ''}">${esc(e.kind)}</span><span class="id">${esc(e.id)}</span><span class="msg">${esc(e.msg)}</span></div>`).join('');
+  $('livebadge').textContent = `${rows.length}${total > rows.length ? ' of ' + total : ''} events`;
+}
+
+// Sections: collapse, focus
+document.querySelectorAll('section').forEach(sec => {
+  if (store.get('collapsed.'+sec.id, false)) sec.classList.add('collapsed');
+  sec.querySelector('header').addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    sec.classList.toggle('collapsed'); store.set('collapsed.'+sec.id, sec.classList.contains('collapsed'));
+  });
+  sec.querySelector('.focusbtn').addEventListener('click', () => {
+    const on = sec.classList.contains('focused');
+    document.querySelectorAll('section').forEach(s => s.classList.remove('focused'));
+    $('main').classList.toggle('focus', !on);
+    if (!on) { sec.classList.add('focused'); sec.classList.remove('collapsed'); }
+  });
+});
+$('allbtn').addEventListener('click', () => { $('main').classList.remove('focus'); document.querySelectorAll('section').forEach(s => { s.classList.remove('focused', 'collapsed'); store.set('collapsed.'+s.id, false); }); });
+document.querySelectorAll('.top nav a').forEach(a => a.addEventListener('click', () => { $('main').classList.remove('focus'); const s = document.querySelector(a.getAttribute('href')); s.classList.remove('collapsed'); store.set('collapsed.'+s.id, false); }));
+$('rows').addEventListener('click', e => {
+  const r = e.target.closest('.prow'); if (!r) return;
+  openRows.has(r.dataset.id) ? openRows.delete(r.dataset.id) : openRows.add(r.dataset.id);
+  store.set('open', [...openRows]); render();
+});
+$('openall').addEventListener('click', () => { document.querySelectorAll('.prow').forEach(r => openRows.add(r.dataset.id)); store.set('open', [...openRows]); render(); });
+$('closeall').addEventListener('click', () => { openRows.clear(); store.set('open', []); render(); });
+['fagent','ftext','fall'].forEach(id => $(id).addEventListener('input', render));
+
+// Tooltip
+const tip = $('tip');
+let tipEl = null;
+function showTip(el) {
+  tipEl = el; tip.innerHTML = el.dataset.tip; tip.classList.add('on'); moveTip();
+}
+function moveTip(x, y) {
+  if (!tipEl) return;
+  const r = tipEl.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = (x ?? r.left) + 12, top = (y ?? r.bottom) + 10;
+  if (left + tw > innerWidth - 8) left = innerWidth - tw - 8;
+  if (top + th > innerHeight - 8) top = (y ?? r.top) - th - 10;
+  tip.style.left = Math.max(8, left) + 'px'; tip.style.top = Math.max(8, top) + 'px';
+}
+document.addEventListener('mouseover', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el); else if (tipEl) { tipEl = null; tip.classList.remove('on'); } });
+document.addEventListener('mousemove', e => { if (tipEl) moveTip(e.clientX, e.clientY); });
+document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip]'); if (el) showTip(el); });
+document.addEventListener('focusout', () => { tipEl = null; tip.classList.remove('on'); });
+
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Turn new coordinator verdicts into dispatcher events and print the dev queue.
+
+The coordinator writes its verdict on a finding to val/<id>.txt, first line `VALID <id> <severity>`,
+`INVALID <id>` or `DUPLICATE <id> of <other>`. This records each verdict not yet in the log as a
+dispatcher event (valid / invalid / duplicate) and prints the findings waiting for a dev, highest
+severity first, then the ones still unvalidated and the ones no verdict file exists for. Run it
+whenever the coordinator reported.
+"""
+import glob, json, os, subprocess
+
+D = os.path.dirname(os.path.abspath(__file__))
+RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+evs = [json.loads(l) for l in open(os.path.join(D, "events.jsonl")) if l.strip()]
+state, arrival = {}, {}
+for e in evs:
+    if e["id"]:
+        arrival.setdefault(e["id"], len(arrival))
+        if e["agent"] == "dispatcher":
+            state[e["id"]] = (e["kind"], e["msg"])
+for p in sorted(glob.glob(os.path.join(D, "val", "*.txt"))):
+    i = os.path.basename(p)[:-4]
+    if i.endswith(".check"):
+        continue
+    first = open(p).readline().split()
+    if not first or state.get(i, ("",))[0] not in ("", "reported", "validating"):
+        continue
+    kind = {"VALID": "valid", "INVALID": "invalid", "DUPLICATE": "duplicate"}.get(first[0])
+    if kind:
+        msg = first[2] if kind == "valid" and len(first) > 2 else " ".join(first[2:]) or "rejected"
+        subprocess.run([os.path.join(D, "ev"), "dispatcher", kind, i, msg])
+        state[i] = (kind, msg)
+q = [i for i, (k, m) in state.items() if k == "valid"]
+q.sort(key=lambda i: (RANK.get(state[i][1], 9), arrival[i]))
+print("DEV QUEUE:", " ".join(f"{i}({state[i][1]})" for i in q) or "empty")
+print("UNVALIDATED:", " ".join(i for i, (k, m) in state.items() if k in ("reported", "validating")) or "none",
+      "| NEW:", " ".join(i for i in arrival if i not in state) or "none")

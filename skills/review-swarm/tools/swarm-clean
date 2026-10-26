@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# swarm-clean --swarm DIR [--repo DIR]: remove the swarm's worktrees and dev branches.
+#
+# Run after the swarm's work is merged. It removes SWARM/base and SWARM/dev* (refusing a worktree
+# with uncommitted changes) and deletes each swarm-devN branch that is fully merged into
+# swarm-review. The swarm folder's log, findings and verdicts, and branch swarm-review, stay: delete
+# them yourself once they are no longer needed.
+set -euo pipefail
+repo=. swarm=
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--repo) repo=$2; shift 2 ;;
+		--swarm) swarm=$2; shift 2 ;;
+		*) echo "unknown option $1" >&2; exit 2 ;;
+	esac
+done
+[ -n "$swarm" ] || { echo "usage: swarm-clean --swarm DIR [--repo DIR]" >&2; exit 2; }
+for t in "$swarm"/base "$swarm"/dev*; do
+	[ -d "$t" ] || continue
+	if [ -n "$(git -C "$t" status --porcelain)" ]; then
+		echo "$t has uncommitted changes; not removed" >&2; continue
+	fi
+	git -C "$repo" worktree remove "$t"
+	echo "removed worktree $t"
+done
+git -C "$repo" worktree prune
+for b in $(git -C "$repo" for-each-ref --format='%(refname:short)' 'refs/heads/swarm-dev*'); do
+	if git -C "$repo" branch -d "$b" >/dev/null 2>&1; then
+		echo "deleted branch $b"
+	else
+		echo "$b has commits not in the checked-out branch; kept" >&2
+	fi
+done
+echo "kept: branch swarm-review, and $swarm with its log, findings and verdicts"

@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""lastmsg AGENT_ID: print the last message a subagent wrote, from its transcript under ~/.claude/projects.
+
+Useful when an agent's completion notification was lost, or when a session takes over a swarm whose
+agents another session started (their ids are in ids.txt).
+"""
+import glob, json, os, sys
+
+if len(sys.argv) != 2:
+    sys.exit("usage: lastmsg AGENT_ID")
+paths = glob.glob(os.path.expanduser(f"~/.claude/projects/*/*/subagents/agent-{sys.argv[1]}.jsonl"))
+if not paths:
+    sys.exit(f"no transcript for agent {sys.argv[1]}")
+last = ""
+for line in open(max(paths, key=os.path.getmtime)):
+    try:
+        d = json.loads(line)
+    except ValueError:
+        continue
+    if d.get("type") != "assistant":
+        continue
+    c = d.get("message", {}).get("content")
+    txt = c if isinstance(c, str) else "".join(x.get("text", "") for x in c or [] if x.get("type") == "text")
+    if txt.strip():
+        last = txt
+print(last)
