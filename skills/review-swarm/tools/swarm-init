@@ -39,6 +39,8 @@ if [ "$source" = swarm-review ]; then  # a rerun: the source branch is the one r
 	source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_branch"])' "$swarm/swarm.json" 2>/dev/null) \
 		|| { echo "the repository is on swarm-review and $swarm/swarm.json does not say which branch it came from" >&2; exit 1; }
 fi
+# --slots sets the count; otherwise a rerun keeps the one in slots/count, which may have been changed by hand
+if [ -z "$slots" ] && [ -s "$swarm/slots/count" ]; then slots=$(cat "$swarm/slots/count"); fi
 [ -n "$slots" ] || slots=$(( ($(nproc) + 1) / 2 )); [ "$slots" -ge 1 ] || slots=1
 
 mkdir -p "$swarm" "$swarm/queue" "$swarm/val" "$swarm/slots"

@@ -422,7 +422,7 @@ const openRows = new Set(store.get('open', [])), openRevs = new Set(store.get('o
 let flash = {id: '', until: 0};  // the pipeline row a reviewer's finding link jumped to, outlined for a moment
 
 async function fetchText(p) {
-  const r = await fetch(p + '?t=' + Date.now(), {cache:'no-store'});
+  const r = await fetch(p + '?t=' + Date.now(), {cache:'no-store', signal: AbortSignal.timeout(10000)});  // a hung request must not stop polling
   if (!r.ok) throw new Error(r.status);
   return r.text();
 }
@@ -618,7 +618,7 @@ function render() {
   const devbusy = DEVS.filter(d => agents[d]?.busy).length;
   $('tiles').innerHTML =
     tile('Reviews done', revdone, `Reviewers R1..R${REVIEWERS.length} each audit one area of the tree, read-only. A review is done when the reviewer reported its last finding and finished.`, 'var(--good)', '/ ' + REVIEWERS.length) +
-    tile('Findings', all.length, 'Problems reported by reviewers, one file each in the queue folder. Includes ones the coordinator later rejected.', null) +
+    tile('Findings', all.length, 'Problems reported by reviewers, plus F-1, F-2, … from the final review, one file each in the queue folder. Includes ones the coordinator later rejected.', null) +
     tile('Agreed', done, 'The dev\'s fix passed its own commit-reviewer loop and the coordinator confirmed it meets the validation. Merged into swarm-review.', 'var(--good)') +
     tile('In pipeline', pipe, 'Validated findings not yet agreed: queued for a dev, being fixed, or being checked.', 'var(--violet)') +
     tile('Rejected', rej, 'The coordinator judged the finding invalid or a duplicate; nothing to fix.', 'var(--ink-3)') +

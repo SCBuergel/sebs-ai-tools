@@ -58,7 +58,7 @@ fine: the devs spend most of their time reading, editing and waiting on their
 reviewer, not testing.
 
 The slot count can be changed while the swarm runs: `echo 4 > $SW/slots/count`
-applies to every test run that starts afterwards. Raise it when the
+applies to every test run that is waiting for a slot or starts afterwards. Raise it when the
 dashboard's load stays below the CPU count while slots are all busy; lower it
 when load goes red or memory amber.
 

@@ -101,8 +101,8 @@ session at the repository, on a clean checkout of the branch to review, ask
 for it: "run a review swarm for the security of this repository", or
 `/review-swarm:review-swarm`. That session becomes the dispatcher. It:
 
-1. sizes the swarm from the machine's CPUs (the limit is test runs, not
-   memory), splits the task into areas, and runs `swarm-init`, which creates a
+1. sizes the swarm from the machine's CPUs and memory (the limit is how many
+   test runs go at once), splits the task into areas, and runs `swarm-init`, which creates a
    swarm folder with the tools and the protocol, branch `swarm-review`, a
    read-only worktree of the starting point, and one worktree per dev;
 2. starts the web dashboard and posts its link, then the reviewers
