@@ -7,82 +7,106 @@
 <style>
 :root {
   color-scheme: dark;
-  --bg: #121211; --surface: #1a1a19; --surface-2: #232322; --line: #2e2e2c; --line-2: #3a3a37;
-  --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8a897f;
-  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --critical: #d03b3b;
-  --blue: #3987e5; --orange: #d95926; --aqua: #199e70; --yellow: #c98500; --magenta: #d55181;
-  --violet: #9085e9; --red: #e66767;
+  --bg: #060908; --surface: rgba(10,16,15,.92); --surface-2: #0f1918; --line: #1a2b29; --line-2: #2a413e;
+  --ink: #dcf7ea; --ink-2: #a3c9ba; --ink-3: #6f978a;
+  --neon: #3dffa2; --neon-dim: rgba(61,255,162,.14); --cyan: #2fd8f0;
+  --good: #2ed872; --warn: #ffc53d; --serious: #ff8a4c; --critical: #ff4d63;
+  --blue: #4fb3ff; --orange: #ff7a3d; --aqua: #2fd8c0; --yellow: #f2c230; --magenta: #ff5fd2;
+  --violet: #a48cff; --red: #ff6b7a;
   --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Inter", sans-serif;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
-a { color: var(--blue); text-decoration: none; }
+/* Faint grid and CRT scanlines: decoration only, never above the tooltip, never catching the mouse */
+body { min-height: 100vh;
+  background: radial-gradient(1200px 600px at 80% -10%, rgba(47,216,240,.07), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(61,255,162,.06), transparent 60%),
+    linear-gradient(rgba(61,255,162,.035) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, rgba(61,255,162,.035) 1px, transparent 1px) 0 0 / 32px 32px, var(--bg); }
+body::after { content: ''; position: fixed; inset: 0; z-index: 40; pointer-events: none;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px); }
+::selection { background: var(--neon); color: #000; }
+a { color: var(--cyan); text-decoration: none; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 code, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 /* Top bar */
 .top { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
-  padding: 10px 16px; background: linear-gradient(180deg, #1c1830, #141320); border-bottom: 1px solid var(--line); }
-.top h1 { font-size: 15px; letter-spacing: .14em; margin: 0; font-weight: 600; display: flex; gap: 10px; align-items: center; }
-.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(12,163,12,.6); animation: pulse 1.6s infinite; }
+  padding: 10px 16px; background: rgba(4,8,7,.94); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(61,255,162,.25), 0 8px 24px rgba(0,0,0,.5); }
+.top h1 { font: 600 15px var(--mono); letter-spacing: .14em; margin: 0; display: flex; gap: 10px; align-items: center;
+  color: var(--neon); text-shadow: 0 0 10px rgba(61,255,162,.45); text-transform: uppercase; }
+.top h1 .prompt { color: var(--ink-3); text-shadow: none; }
+#title::after { content: '_'; margin-left: 2px; animation: blink 1.1s steps(1) infinite; }
+.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 0 0 rgba(61,255,162,.6); animation: pulse 1.6s infinite; }
 .pulse.stale { background: var(--serious); animation: none; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,.55);} 70% { box-shadow: 0 0 0 8px rgba(12,163,12,0);} 100% { box-shadow: 0 0 0 0 rgba(12,163,12,0);} }
-.top .meta { color: var(--ink-2); display: flex; gap: 14px; flex-wrap: wrap; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61,255,162,.55);} 70% { box-shadow: 0 0 0 8px rgba(61,255,162,0);} 100% { box-shadow: 0 0 0 0 rgba(61,255,162,0);} }
+.top .meta { color: var(--ink-2); display: flex; gap: 14px; flex-wrap: wrap; font: 12.5px var(--mono); }
 .top nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
-.top nav button, .top nav a { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--ink-2); font-size: 12.5px; }
-.top nav button:hover, .top nav a:hover { color: var(--ink); border-color: var(--ink-3); }
+.top nav button, .top nav a { padding: 4px 10px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--ink-2); font: 12px var(--mono); text-transform: lowercase; }
+.top nav a::before { content: '#'; color: var(--ink-3); }
+.top nav button:hover, .top nav a:hover, .top nav a:focus-visible, .top nav button:focus-visible { color: var(--neon); border-color: var(--neon); box-shadow: 0 0 10px var(--neon-dim); outline: none; }
 
 main { padding: 12px 16px 40px; display: grid; gap: 12px; max-width: 1500px; margin: 0 auto; }
 
 /* Sections */
-section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+section { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; transition: border-color .2s, box-shadow .2s; }
+section:hover { border-color: var(--line-2); box-shadow: 0 0 0 1px rgba(61,255,162,.05), 0 0 24px rgba(61,255,162,.04); }
 section > header { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; user-select: none;
-  background: var(--surface-2); border-bottom: 1px solid var(--line); }
-section > header:hover { background: #282826; }
-section > header h2 { margin: 0; font-size: 13px; letter-spacing: .1em; font-weight: 600; text-transform: uppercase; color: var(--ink-2); }
+  background: linear-gradient(90deg, rgba(61,255,162,.07), transparent 45%), var(--surface-2); border-bottom: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--neon); }
+section > header:hover { background: linear-gradient(90deg, rgba(61,255,162,.13), transparent 55%), var(--surface-2); }
+section > header h2 { margin: 0; font: 600 13px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--neon); }
+section > header h2::before { content: '// '; color: var(--ink-3); }
 section.collapsed > header { border-bottom: 0; }
 section.collapsed > .body { display: none; }
 .chev { display: inline-block; width: 14px; color: var(--ink-3); transition: transform .15s; }
 section.collapsed .chev { transform: rotate(-90deg); }
 .badge:empty { display: none; }
-.badge { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 10px; background: var(--line-2); color: var(--ink-2); }
-.help { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ink-3); color: var(--ink-3); font-size: 11px;
+.badge { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 3px; border: 1px solid var(--line-2); background: rgba(0,0,0,.35); color: var(--ink-2); }
+.help { width: 18px; height: 18px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--ink-3); font: 11px var(--mono);
   display: inline-flex; align-items: center; justify-content: center; }
-.help:hover, [data-tip]:hover > .help { border-color: var(--violet); color: var(--violet); }
+.help:hover, [data-tip]:hover > .help { border-color: var(--neon); color: var(--neon); }
 .hdr-tools { margin-left: auto; display: flex; gap: 6px; }
-.hdr-tools button { color: var(--ink-3); padding: 2px 7px; border-radius: 5px; font-size: 12px; }
-.hdr-tools button:hover { color: var(--ink); background: var(--line-2); }
+.hdr-tools button { color: var(--ink-3); padding: 2px 7px; border-radius: 3px; font: 12px var(--mono); }
+.hdr-tools button:hover, .hdr-tools button:focus-visible { color: var(--neon); background: var(--neon-dim); outline: none; }
 main.focus section:not(.focused) { display: none; }
 .body { padding: 12px; }
 
 /* Overview */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-.tile { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.tile .k { color: var(--ink-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; display: flex; gap: 6px; align-items: center; }
-.tile .v { font-size: 26px; font-weight: 600; font-family: var(--mono); margin-top: 2px; display: flex; align-items: baseline; gap: 6px; }
+.tile { position: relative; background: var(--surface-2); border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; }
+.tile::before, .tile::after { content: ''; position: absolute; width: 7px; height: 7px; border: 1px solid var(--line-2); }
+.tile::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.tile::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.tile:hover::before, .tile:hover::after { border-color: var(--neon); }
+.tile .k { color: var(--ink-3); font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; display: flex; gap: 6px; align-items: center; }
+.tile .v { font-size: 26px; font-weight: 600; font-family: var(--mono); margin-top: 2px; display: flex; align-items: baseline; gap: 6px;
+  text-shadow: 0 0 14px rgba(61,255,162,.22); }
 .tile .v small { font-size: 13px; color: var(--ink-3); font-weight: 400; }
 .tile .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .progress { margin-top: 12px; display: grid; gap: 6px; }
-.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; display: flex; }
+.bar { height: 10px; border-radius: 2px; background: var(--line); overflow: hidden; display: flex; }
 .bar i { display: block; height: 100%; }
-.bar .agreed { background: var(--good); }
-.bar .pipe { background: var(--violet); opacity: .55; }
+.bar .agreed { background: var(--good); box-shadow: 0 0 10px rgba(46,216,114,.5); }
+.bar .pipe { background: repeating-linear-gradient(135deg, var(--violet) 0 6px, rgba(164,140,255,.45) 6px 12px); opacity: .75; }
 .bar .unres { background: var(--critical); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 12.5px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
-.chip { display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px; border-radius: 6px; font-size: 12.5px;
+.chip { display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px; border-radius: 3px; font: 12px var(--mono);
   border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); }
 .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
-.note { margin-top: 12px; padding: 8px 10px; border-left: 3px solid var(--violet); background: var(--surface-2); border-radius: 0 6px 6px 0; color: var(--ink-2); font-style: italic; }
+.note { margin-top: 12px; padding: 8px 10px; border-left: 2px solid var(--neon); background: var(--surface-2); border-radius: 0 3px 3px 0; color: var(--ink-2); }
 .note b { color: var(--ink); font-style: normal; }
 
 /* Agents */
 .agents { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 900px) { .agents { grid-template-columns: 1fr; } }
 .alist { display: grid; gap: 4px; }
-.arow { display: grid; grid-template-columns: 16px 86px 1fr auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); }
+.arow { display: grid; grid-template-columns: 16px 86px 1fr auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 3px; background: var(--surface-2); border: 1px solid transparent; }
+.arow:hover { border-color: var(--line-2); }
 .arow.team { grid-template-columns: 16px 110px 64px auto 1fr auto; }
 .arow .name { font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
 .arow .focusarea { color: var(--ink-2); font-size: 12px; }
@@ -91,10 +115,10 @@ main.focus section:not(.focused) { display: none; }
 .arow .fid { font-family: var(--mono); font-size: 12px; color: var(--ink); }
 .arow .n { font-family: var(--mono); font-size: 11.5px; color: var(--yellow); }
 .state { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--line-2); }
-.state.done { background: var(--good); }
+.state.done { background: var(--good); box-shadow: 0 0 6px var(--good); }
 .state.busy { background: var(--yellow); animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .35; } }
-.sub { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
+.sub { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
 
 /* Pipeline */
 .stages { display: flex; gap: 0; align-items: center; color: var(--ink-3); font-size: 12px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -102,17 +126,18 @@ main.focus section:not(.focused) { display: none; }
 .stages span:hover { background: var(--line-2); color: var(--ink); }
 .stages em { font-style: normal; color: var(--line-2); }
 .ptable { width: 100%; border-collapse: collapse; }
-.ptable th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); padding: 4px 8px; border-bottom: 1px solid var(--line); font-weight: 500; }
+.ptable th { text-align: left; font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); padding: 4px 8px; border-bottom: 1px solid var(--line); font-weight: 500; }
 .ptable td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .prow { cursor: pointer; }
 .prow:hover td { background: var(--surface-2); }
+.prow:hover td:first-child { box-shadow: inset 2px 0 0 var(--neon); }
 .prow.open td { background: var(--surface-2); border-bottom: 0; }
 .sev { display: inline-flex; gap: 5px; align-items: center; font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line-2); white-space: nowrap; }
 .sev .dot { width: 8px; height: 8px; border-radius: 50%; }
 .id { font-family: var(--mono); font-weight: 600; }
 .track { display: inline-flex; align-items: center; gap: 0; }
 .track .d { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--line-2); display: inline-block; }
-.track .d.done { background: var(--good); border-color: var(--good); }
+.track .d.done { background: var(--good); border-color: var(--good); box-shadow: 0 0 5px rgba(46,216,114,.6); }
 .track .d.cur { background: var(--yellow); border-color: var(--yellow); animation: blink 1.2s infinite; }
 .track .d.bad { background: var(--critical); border-color: var(--critical); }
 .track .l { width: 12px; height: 2px; background: var(--line-2); display: inline-block; }
@@ -124,8 +149,8 @@ main.focus section:not(.focused) { display: none; }
 .detail td { padding: 0 8px 12px 8px; background: var(--surface-2); }
 .dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 1000px) { .dgrid { grid-template-columns: 1fr; } }
-.dblock { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.dblock h4 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 500; display: flex; gap: 6px; align-items: center; }
+.dblock { background: rgba(0,0,0,.45); border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; }
+.dblock h4 { margin: 0 0 6px; font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 500; display: flex; gap: 6px; align-items: center; }
 .dblock p { margin: 0; white-space: pre-wrap; color: var(--ink-2); max-height: 260px; overflow: auto; }
 .dblock p.verdict { color: var(--ink); }
 .hist { display: grid; gap: 4px; }
@@ -133,12 +158,17 @@ main.focus section:not(.focused) { display: none; }
 .hist .t { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
 .loc { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 .muted { color: var(--ink-3); }
-.rejected { margin-top: 10px; color: var(--ink-3); font-size: 12.5px; }
+.rejected { margin-top: 10px; color: var(--ink-3); font: 12px var(--mono); }
+.empty { padding: 14px 8px; color: var(--ink-3); font: 12.5px var(--mono); }
+.empty::before { content: '> '; color: var(--neon); }
 .rejected span { cursor: pointer; text-decoration: underline dotted; }
 
 /* Live */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-.filters select, .filters input { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12.5px; }
+.filters select, .filters input { background: rgba(0,0,0,.5); color: var(--ink); border: 1px solid var(--line-2); border-radius: 3px; padding: 4px 8px; font: 12.5px var(--mono); }
+.filters select:focus, .filters input:focus { outline: none; border-color: var(--neon); box-shadow: 0 0 8px var(--neon-dim); }
+.filters input::placeholder { color: var(--ink-3); }
+.fhead { position: sticky; top: 0; background: var(--surface-2); color: var(--ink-3); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
 .feed { font-family: var(--mono); font-size: 12.5px; display: grid; gap: 1px; max-height: 60vh; overflow: auto; }
 html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 .frow { display: grid; grid-template-columns: 64px 92px 86px 56px 1fr; gap: 10px; padding: 3px 6px; border-radius: 4px; }
@@ -146,10 +176,11 @@ html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 .frow .t { color: var(--ink-3); }
 .frow .kind { color: var(--ink-3); }
 .frow .msg { color: var(--ink-2); white-space: pre-wrap; word-break: break-word; }
+.frow.fhead:hover { background: var(--surface-2); }
 .frow.k-reported .kind, .frow.k-valid .kind, .frow.k-agreed .kind, .frow.k-done .kind { color: var(--good); }
 .frow.k-invalid .kind, .frow.k-duplicate .kind { color: var(--ink-3); }
 .frow.k-unresolved .kind { color: var(--critical); }
-.frow.k-note .kind { color: var(--violet); }
+.frow.k-note .kind { color: var(--neon); }
 .frow.k-dev .kind { color: var(--yellow); }
 .frow .kind.ph-dev { color: var(--yellow); } .frow .kind.ph-review { color: var(--blue); }
 .frow .kind.ph-approved { color: var(--good); } .frow .kind.ph-blocked { color: var(--critical); }
@@ -168,51 +199,64 @@ html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 .track .d.cur.review { background: var(--blue); border-color: var(--blue); }
 
 /* Tooltip */
-#tip { position: fixed; z-index: 50; max-width: 340px; padding: 8px 10px; border-radius: 7px; background: #0c0c14; color: var(--ink);
-  border: 1px solid var(--violet); box-shadow: 0 6px 24px rgba(0,0,0,.5); font-size: 12.5px; line-height: 1.4; pointer-events: none;
-  opacity: 0; transition: opacity .1s; }
+#tip { position: fixed; z-index: 50; max-width: 360px; padding: 8px 10px; border-radius: 3px; background: #030605; color: var(--ink);
+  border: 1px solid var(--neon); box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 0 18px rgba(61,255,162,.18), 0 8px 28px rgba(0,0,0,.6);
+  font-size: 12.5px; line-height: 1.45; pointer-events: none; opacity: 0; transition: opacity .1s; }
 #tip.on { opacity: 1; }
-#tip b { color: var(--violet); }
+#tip b { color: var(--neon); font-family: var(--mono); font-weight: 600; }
+.foot { text-align: center; color: var(--ink-3); font: 11.5px var(--mono); padding: 4px 0 0; letter-spacing: .04em; }
+.foot span { cursor: help; }
+.tablewrap { overflow-x: auto; }
+section > header h2 { white-space: nowrap; }
+.tile .v { flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 [data-tip] { cursor: help; }
 .prow[data-tip], .arow[data-tip], header[data-tip] { cursor: pointer; }
-.a-coordinator { color: var(--blue); } .a-dispatcher { color: var(--violet); }
+.a-coordinator { color: var(--blue); } .a-dispatcher { color: var(--neon); }
 /* .a-dev<n> colours are generated by the script for however many devs the swarm has */
 /* Machine */
-.mbar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.mbar { height: 8px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 6px; }
 .mbar i { display: block; height: 100%; }
 .slots { margin-top: 12px; display: grid; gap: 4px; }
-.slot { display: grid; grid-template-columns: 60px 90px 1fr 90px 60px; gap: 10px; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); font: 12.5px var(--mono); align-items: center; }
+.slot { display: grid; grid-template-columns: 60px 90px 1fr 90px 60px; gap: 10px; padding: 5px 8px; border-radius: 3px; background: var(--surface-2); font: 12.5px var(--mono); align-items: center; }
 .slot .cmd { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slot.free { color: var(--ink-3); }
-.a-R { color: #86b6ef; }
+.a-R { color: var(--cyan); }
+/* Narrow screens; last, so it overrides the rules above */
+@media (max-width: 600px) {
+  section > header .badge { display: none; }
+  .slot { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .slot .cmd { order: 9; flex-basis: 100%; }
+  .slot .pid { display: none; }
+}
 </style>
 </head>
 <body>
 <div class="top">
-  <h1><span class="pulse" id="pulse"></span><span id="title">REVIEW SWARM</span></h1>
+  <h1 data-tip="<b>Swarm</b><br>The title from swarm.json in the swarm folder. The dot pulses green while the page reads the log every 2 seconds and turns orange when a read fails (the server stopped, or the folder moved)."><span class="pulse" id="pulse"></span><span class="prompt">&gt;</span><span id="title">REVIEW SWARM</span></h1>
   <div class="meta">
     <span data-tip="<b>Elapsed</b><br>Time since the first event in events.jsonl, i.e. since the swarm started.">⏱ <span id="elapsed">–</span></span>
     <span data-tip="<b>Events</b><br>Lines in events.jsonl, the shared log every agent appends to with the ev helper.">📜 <span id="nev">–</span> events</span>
     <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 2 seconds; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
   </div>
   <nav>
-    <a href="#overview">Overview</a><a href="#machine">Machine</a><a href="#agents">Agents</a><a href="#pipeline">Pipeline</a><a href="#live">Live</a>
+    <a href="#overview" data-tip="Jump to <b>Overview</b>: reviews done, finding counts, progress and the latest note.">overview</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
     <button id="allbtn" data-tip="Show every section again after focusing on one, and expand them all.">⤡ show all</button>
   </nav>
 </div>
 
 <main id="main">
-  <div id="err" style="display:none;padding:8px 12px;border-radius:8px;background:#3a1414;border:1px solid var(--critical);font-family:var(--mono)"></div>
+  <div id="err" data-tip="<b>Dashboard error</b><br>The page's script failed. The swarm is not affected; reload the page, and if it repeats, ask the dash agent to fix dash.html." style="display:none;padding:8px 12px;border-radius:8px;background:#3a1414;border:1px solid var(--critical);font-family:var(--mono)"></div>
   <section id="overview">
     <header data-tip="<b>Overview</b><br>Where the swarm stands: how many reviews finished, how many findings exist and how far they got. Click to collapse, ⤢ to focus on this section alone.">
       <span class="chev">▼</span><h2>Overview</h2><span class="help">?</span>
-      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+      <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
     <div class="body">
       <div class="tiles" id="tiles"></div>
       <div class="progress">
         <div class="bar" id="bar" data-tip="<b>Progress</b><br>Validated findings by outcome. Green = agreed and merged into swarm-review, violet = still in the pipeline, red = unresolved."></div>
-        <div class="legend"><span><i style="background:var(--good)"></i>agreed</span><span><i style="background:var(--violet);opacity:.55"></i>in pipeline</span><span><i style="background:var(--critical)"></i>unresolved</span><span><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
+        <div class="legend"><span data-tip="<b>Agreed</b><br>Fixed, approved by the dev's commit-reviewer, confirmed by the coordinator, and merged into swarm-review."><i style="background:var(--good)"></i>agreed</span><span data-tip="<b>In pipeline</b><br>Validated but not agreed yet: queued for a dev, being fixed, or being checked."><i style="background:var(--violet);opacity:.75"></i>in pipeline</span><span data-tip="<b>Unresolved</b><br>No agreement after 4 rounds, or dev and coordinator disagree. Needs the user."><i style="background:var(--critical)"></i>unresolved</span><span data-tip="<b>Total</b><br>Agreed findings out of all validated ones. Rejected and duplicate findings do not count."><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
       </div>
       <div class="chips" id="chips"></div>
       <div class="note" id="note" style="display:none"></div>
@@ -221,8 +265,8 @@ html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 
   <section id="machine">
     <header data-tip="<b>Machine</b><br>Memory, swap, CPU load and test slots of this machine, read from /proc and slots/ every 2 seconds, so memory pressure shows before the kernel starts killing processes. Click to collapse, ⤢ to focus on this section alone.">
-      <span class="chev">▼</span><h2>Machine</h2><span class="badge" id="machbadge"></span><span class="help">?</span>
-      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+      <span class="chev">▼</span><h2>Machine</h2><span class="badge" id="machbadge" data-tip="<b>Machine summary</b><br>Memory available, 1-minute load against the CPU count, and busy test slots. Turns amber or red with the tiles below."></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
     <div class="body">
       <div class="tiles" id="mtiles"></div>
@@ -232,8 +276,8 @@ html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 
   <section id="agents">
     <header data-tip="<b>Agents</b><br>Who is in the swarm and what each is doing right now, from their own status events. Reviewers are read-only auditors; the coordinator judges; only the devs change code.">
-      <span class="chev">▼</span><h2>Agents</h2><span class="badge" id="agentsbadge"></span><span class="help">?</span>
-      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+      <span class="chev">▼</span><h2>Agents</h2><span class="badge" id="agentsbadge" data-tip="<b>Agents summary</b><br>Reviewers that finished, devs holding a finding, and how many of those changes are with the dev's commit-reviewer right now."></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
     <div class="body agents">
       <div>
@@ -249,40 +293,41 @@ html, .feed { scrollbar-color: var(--line-2) var(--surface); }
 
   <section id="pipeline">
     <header data-tip="<b>Findings pipeline</b><br>Every finding a reviewer reported, how far it got, and who holds it. Click a row to open the full finding: problem, exploit scenario, coordinator verdict and history.">
-      <span class="chev">▼</span><h2>Findings pipeline</h2><span class="badge" id="pipebadge"></span><span class="help">?</span>
-      <div class="hdr-tools"><button id="openall">open all</button><button id="closeall">close all</button><button class="focusbtn" title="focus">⤢</button></div>
+      <span class="chev">▼</span><h2>Findings pipeline</h2><span class="badge" id="pipebadge" data-tip="<b>Pipeline summary</b><br>Findings still in the table (not rejected) and how many of them are agreed."></span><span class="help">?</span>
+      <div class="hdr-tools"><button id="openall" data-tip="<b>Open all</b><br>Expand every finding in the table to show its problem, verdict and history.">open all</button><button id="closeall" data-tip="<b>Close all</b><br>Collapse every expanded finding.">close all</button><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
     <div class="body">
       <div class="stages" id="stages"></div>
-      <table class="ptable">
+      <div class="tablewrap"><table class="ptable">
         <thead><tr>
           <th data-tip="<b>Severity</b><br>The coordinator's rating when it validated the finding: Critical, High, Medium, Low or Info. ? means not validated yet.">Sev</th>
           <th data-tip="<b>Id</b><br>Reviewer name and a running number, e.g. R10-1 is the first finding of reviewer R10.">Id</th>
           <th data-tip="<b>Stage track</b><br>Five dots: reported → validated → dev → coordinator → agreed. Green are passed, the blinking yellow one is where the finding is now.">Stage</th>
           <th data-tip="<b>State</b><br>What is happening to the finding right now and who holds it, as recorded by the dispatcher.">State</th>
           <th data-tip="<b>Round</b><br>How many times a dev was handed this finding. After 4 rounds without agreement it becomes unresolved.">Round</th>
-          <th>Title</th>
+          <th data-tip="<b>Title</b><br>The reviewer's one-line summary. While a dev works on it, the review-loop steps of this round show underneath.">Title</th>
         </tr></thead>
         <tbody id="rows"></tbody>
-      </table>
+      </table></div>
       <div class="rejected" id="rejected"></div>
     </div>
   </section>
 
   <section id="live">
     <header data-tip="<b>Live feed</b><br>The raw event log, newest first: time, agent, kind of event, finding id, message. Use the filters to follow one agent or one finding.">
-      <span class="chev">▼</span><h2>Live feed</h2><span class="badge" id="livebadge"></span><span class="help">?</span>
-      <div class="hdr-tools"><button class="focusbtn" title="focus">⤢</button></div>
+      <span class="chev">▼</span><h2>Live feed</h2><span class="badge" id="livebadge" data-tip="<b>Feed summary</b><br>Events shown below, and the total matching the filters when only the last 150 are shown."></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
     </header>
     <div class="body">
       <div class="filters">
-        <select id="fagent"><option value="">all agents</option></select>
-        <input id="ftext" placeholder="filter text or finding id" size="26">
-        <label class="muted"><input type="checkbox" id="fall"> show all (not just last 150)</label>
+        <select id="fagent" data-tip="<b>Agent filter</b><br>Show only the events one agent wrote."><option value="">all agents</option></select>
+        <input id="ftext" placeholder="grep: text or finding id" size="26" data-tip="<b>Text filter</b><br>Show only events whose finding id, kind or message contains this text (case-insensitive).">
+        <label class="muted" data-tip="<b>Show all</b><br>The feed shows the last 150 matching events so the page stays fast; tick this to show every one."><input type="checkbox" id="fall"> show all (not just last 150)</label>
       </div>
       <div class="feed" id="feed"></div>
     </div>
   </section>
+  <div class="foot"><span data-tip="<b>Where this comes from</b><br>Everything on this page is read from files in the swarm folder (events.jsonl, swarm.json, queue/, val/) and /proc. dashweb.py serves it on 127.0.0.1 only and refuses requests with a foreign Host header, so findings stay on this machine.">-----BEGIN SWARM STATE----- // read from files · served on 127.0.0.1 only // -----END SWARM STATE-----</span></div>
 </main>
 <div id="tip"></div>
 <style id="devstyle"></style>
@@ -331,6 +376,17 @@ const PHASE = {
   approved: ['APPROVED', 'The dev\'s commit-reviewer approved the change; the dev merges it next.'],
   blocked:  ['BLOCKED', 'The dev is stuck and needs the dispatcher or the user.'],
 };
+// What each event kind means, for the live feed's tooltips. The dispatcher's finding states come from STATE.
+const KIND = {
+  status: 'The agent reports what it is doing.',
+  reported: 'A reviewer reported a finding and wrote queue/<id>.json.',
+  done: 'A reviewer finished its area.',
+  idle: 'A dev finished its finding and waits for the next one.',
+  focus: 'The area this agent covers.',
+  note: 'Free-text narration, usually the dispatcher explaining a decision.',
+  phase: 'A review-loop step of a dev: implement, test, review-k, fix-k, approved, merge or blocked.',
+};
+const kindTip = k => KIND[k] || (STATE[k] ? 'Dispatcher: finding is now "' + STATE[k][0] + '". ' + STATE[k][1] : 'An event kind this page has no description for.');
 const ROLE_TIP = {
   coordinator: 'Validates findings and checks fixes. Read-only, runs no tests.',
   dispatcher: 'Passes messages between agents and records state transitions. Never judges a finding.',
@@ -444,31 +500,31 @@ function track(f) {
 
 function detail(id, f) {
   const q = queue[id] || {}, v = (val[id] || '').trim();
-  const block = (title, tip, body, cls='') => body ? `<div class="dblock"><h4 data-tip="${tesc(tip)}">${title} <span class="help">?</span></h4><p class="${cls}">${esc(body)}</p></div>` : '';
+  const block = (title, tip, body, cls='') => body ? `<div class="dblock" data-tip="<b>${title}</b><br>${tesc(tip)}"><h4>${title} <span class="help">?</span></h4><p class="${cls}">${esc(body)}</p></div>` : '';
   const hist = f.hist.map(e => `<div><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(STATE[e.kind]?.[0] || e.kind)}</span><span class="muted">${esc(e.msg)}</span></div>`).join('');
   const loc = q.file ? `<span class="loc">${esc(q.file)}${q.line ? ':'+esc(q.line) : ''}</span>` : '';
   return `<tr class="detail"><td colspan="6">
-    <div class="muted" style="margin:4px 0 10px">reported by <b class="a-R">${esc(f.by)}</b> ${loc} ${q.severity ? `· reviewer rated <b>${esc(q.severity)}</b>` : ''} ${f.dev ? `· dev <b class="${acls(f.dev)}">${f.dev}</b>` : ''}</div>
+    <div class="muted" style="margin:4px 0 10px" data-tip="<b>Origin</b><br>The reviewer that reported the finding, the file and line it points at, the severity the reviewer proposed (the coordinator's rating in the Sev column is the one that counts), and the dev that holds or held it.">reported by <b class="a-R">${esc(f.by)}</b> ${loc} ${q.severity ? `· reviewer rated <b>${esc(q.severity)}</b>` : ''} ${f.dev ? `· dev <b class="${acls(f.dev)}">${f.dev}</b>` : ''}</div>
     <div class="dgrid">
       ${block('Problem', 'The reviewer\'s description of what is wrong, from queue/'+id+'.json.', q.description)}
       ${block('Exploit scenario', 'How the reviewer thinks the flaw could be abused or what could go wrong.', q.failure_scenario)}
       ${block('Suggested fix', 'The reviewer\'s proposal; the dev may choose a different fix.', q.fix || q.suggested_fix)}
       ${block('Coordinator verdict', 'The coordinator\'s validation from val/'+id+'.txt: valid or not, severity, and what a fix must achieve.', v, 'verdict')}
-      ${f.phases.length ? `<div class="dblock"><h4 data-tip="Every review-loop step the dev reported for this finding in this round, oldest first.">Review loop <span class="help">?</span></h4><div class="hist">${f.phases.map(e => `<div><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span>${pill(e.msg)} <span class="muted">${esc(e.msg)}</span></span></div>`).join('')}</div></div>` : ''}
-      <div class="dblock"><h4 data-tip="Every state change the dispatcher recorded for this finding, oldest first.">History <span class="help">?</span></h4><div class="hist">${hist || '<span class="muted">none yet</span>'}</div></div>
-      ${f.last ? `<div class="dblock"><h4 data-tip="The most recent status an agent reported while holding this finding.">Latest activity <span class="help">?</span></h4><p><b class="${acls(f.last.agent)}">${esc(f.last.agent)}</b>: ${esc(f.last.msg)} <span class="muted">· ${hms(f.last.t)}</span></p></div>` : ''}
+      ${f.phases.length ? `<div class="dblock" data-tip="<b>Review loop</b><br>Every review-loop step the dev reported for this finding in this round, oldest first."><h4>Review loop <span class="help">?</span></h4><div class="hist">${f.phases.map(e => `<div><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span>${pill(e.msg)} <span class="muted">${esc(e.msg)}</span></span></div>`).join('')}</div></div>` : ''}
+      <div class="dblock" data-tip="<b>History</b><br>Every state change the dispatcher recorded for this finding, oldest first."><h4>History <span class="help">?</span></h4><div class="hist">${hist || '<span class="muted">none yet</span>'}</div></div>
+      ${f.last ? `<div class="dblock" data-tip="<b>Latest activity</b><br>The most recent status an agent reported while holding this finding."><h4>Latest activity <span class="help">?</span></h4><p><b class="${acls(f.last.agent)}">${esc(f.last.agent)}</b>: ${esc(f.last.msg)} <span class="muted">· ${hms(f.last.t)}</span></p></div>` : ''}
     </div></td></tr>`;
 }
 
 // Machine panel from /sys.json: memory amber under 2 GB available and red under 1 GB; load amber above the CPU
 // count and red above 1.5 times it.
 const GIB = 2 ** 30;
-const gib = b => (b / GIB).toFixed(1) + ' G';
+const gib = b => (b / GIB).toFixed(1) + '\u00a0G';
 const memColor = b => b < GIB ? 'var(--critical)' : b < 2 * GIB ? 'var(--warn)' : 'var(--good)';
 const loadColor = (l, c) => l > 1.5 * c ? 'var(--critical)' : l > c ? 'var(--warn)' : 'var(--good)';
 function renderMachine(now) {
   if (!mach) {
-    $('mtiles').innerHTML = '<span class="muted">No machine data: the server does not serve /sys.json yet (restart dashweb.py).</span>';
+    $('mtiles').innerHTML = '<span class="empty" data-tip="<b>No machine data</b><br>The server answered without /sys.json, usually an older dashweb.py. Restart it from the swarm folder.">no machine data: the server does not serve /sys.json yet (restart dashweb.py)</span>';
     $('slots').innerHTML = ''; $('machbadge').textContent = ''; return;
   }
   const m = mach, used = m.mem_total - m.mem_avail, mc = memColor(m.mem_avail), lc = loadColor(m.load[0], m.cpus);
@@ -481,8 +537,8 @@ function renderMachine(now) {
   const rows = [];
   for (let n = 1; n <= m.slot_count; n++) {
     const j = m.slots.find(x => x.slot === n);
-    rows.push(j ? `<div class="slot" data-tip="<b>Slot ${n}</b> — ${tesc(j.who)}<br>${tesc(j.cmd)}<br>in ${tesc(j.cwd)}, pid ${tesc(j.pid)}"><span>slot ${n}</span><span class="${acls(String(j.who))}">${esc(j.who)}</span><span class="cmd">${esc(j.cmd)}</span><span class="muted">pid ${esc(j.pid)}</span><span class="muted">${typeof j.start === 'number' ? ago(j.start, now) : ''}</span></div>`
-      : `<div class="slot free" data-tip="<b>Slot ${n}</b><br>Free: no test run holds it."><span>slot ${n}</span><span>free</span><span></span><span></span><span></span></div>`);
+    rows.push(j ? `<div class="slot" data-tip="<b>Slot ${n}</b> — ${tesc(j.who)}<br>${tesc(j.cmd)}<br>in ${tesc(j.cwd)}, pid ${tesc(j.pid)}"><span>slot ${n}</span><span class="${acls(String(j.who))}">${esc(j.who)}</span><span class="cmd">${esc(j.cmd)}</span><span class="muted pid">pid ${esc(j.pid)}</span><span class="muted">${typeof j.start === 'number' ? ago(j.start, now) : ''}</span></div>`
+      : `<div class="slot free" data-tip="<b>Slot ${n}</b><br>Free: no test run holds it."><span>slot ${n}</span><span>free</span><span></span><span class="pid"></span><span></span></div>`);
   }
   $('slots').innerHTML = rows.join('');
   $('machbadge').textContent = `${gib(m.mem_avail)} avail · load ${m.load[0].toFixed(2)}/${m.cpus} · ${m.slots.length}/${m.slot_count} slots`;
@@ -527,7 +583,7 @@ function render() {
   renderMachine(now);
 
   // Agents
-  $('reviewers').innerHTML = REVIEWERS.map(r => {
+  $('reviewers').innerHTML = (REVIEWERS.length ? '' : '<div class="empty" data-tip="<b>No reviewers</b><br>swarm.json names none and none has written to the log yet.">no reviewers yet</div>') + REVIEWERS.map(r => {
     const st = agents[r];
     const cls = !st ? '' : st.done ? 'done' : 'busy';
     return `<div class="arow" data-tip="<b>${r}</b> — ${tesc(focus[r] || 'no focus reported')}<br>${st ? (st.done ? 'Finished. ' : 'Working. ') + 'Reported ' + st.n + ' finding' + (st.n === 1 ? '' : 's') + '.<br>Last: ' + tesc(st.msg) : 'Not started.'}">
@@ -554,13 +610,13 @@ function render() {
     const sev = f.sev || '?';
     const open = openRows.has(i);
     return `<tr class="prow${open ? ' open' : ''}" data-id="${esc(i)}" data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[f.state]?.[0] || f.state)}<br>${tesc(ltip)}<br><span class='muted'>click to ${open ? 'close' : 'open'} the full finding</span>">
-      <td><span class="sev"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span></td>
+      <td><span class="sev" data-tip="<b>${tesc(sev)}</b><br>${f.sev ? 'The coordinator rated this finding ' + tesc(sev) + ' when it validated it (scale in severity.md).' : 'Not validated yet: the coordinator has not rated it.'}"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span></td>
       <td class="id">${esc(i)}</td><td>${track(f)}</td><td class="lab">${label}</td>
-      <td class="round">${f.round ? `r${f.round}/4` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
-  }).join('');
+      <td class="round">${f.round ? `<span data-tip="<b>Round ${f.round} of 4</b><br>Handed to a dev ${f.round} time${f.round === 1 ? '' : 's'}. After 4 rounds without agreement the finding becomes unresolved.">r${f.round}/4</span>` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
+  }).join('') || `<tr><td colspan="6" class="empty" data-tip="<b>No findings yet</b><br>Reviewers announce findings with a reported event; each shows up here at once.">awaiting first finding…</td></tr>`;
   $('pipebadge').textContent = `${active.length} active · ${done} agreed`;
   const gone = order.filter(i => ['invalid','duplicate'].includes(findings[i].state));
-  $('rejected').innerHTML = gone.length ? 'rejected: ' + gone.map(i => `<span data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[findings[i].state][0])}<br>${tesc(findings[i].title)}<br><i>${tesc(findings[i].hist.slice(-1)[0]?.msg || '')}</i>">${esc(i)}</span>`).join(', ') : '';
+  $('rejected').innerHTML = gone.length ? `<span data-tip="<b>Rejected</b><br>Findings the coordinator judged invalid or duplicates; they leave the table. Hover one for its title and the reason.">rejected:</span> ` + gone.map(i => `<span data-tip="<b>${tesc(i)}</b> — ${tesc(STATE[findings[i].state][0])}<br>${tesc(findings[i].title)}<br><i>${tesc(findings[i].hist.slice(-1)[0]?.msg || '')}</i>">${esc(i)}</span>`).join(', ') : '';
 
   // Live
   const sel = $('fagent');
@@ -570,7 +626,8 @@ function render() {
   let rows = evs.filter(e => (!fa || e.agent === fa) && (!ft || (e.id + ' ' + e.msg + ' ' + e.kind).toLowerCase().includes(ft)));
   const total = rows.length;
   if (!$('fall').checked) rows = rows.slice(-150);
-  $('feed').innerHTML = rows.slice().reverse().map(e => `<div class="frow k-${esc(e.kind)}"><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span class="kind${e.kind === 'phase' ? ' ph-' + phaseKind(e.msg) : ''}">${esc(e.kind)}</span><span class="id">${esc(e.id)}</span><span class="msg">${esc(e.msg)}</span></div>`).join('');
+  const fhead = `<div class="frow fhead"><span data-tip="<b>Time</b><br>When the event was written, in this browser's time zone.">time</span><span data-tip="<b>Agent</b><br>Who wrote the event: R&lt;n&gt; reviewers, coordinator, dev&lt;n&gt;, dispatcher.">agent</span><span data-tip="<b>Kind</b><br>What sort of event it is; hover a row for its meaning.">kind</span><span data-tip="<b>Id</b><br>The finding the event is about, if any.">id</span><span data-tip="<b>Message</b><br>Free text from the agent.">message</span></div>`;
+  $('feed').innerHTML = fhead + (rows.length ? '' : '<div class="empty" data-tip="<b>No events</b><br>Nothing in events.jsonl matches, or the swarm has not written its first event yet.">no matching events</div>') + rows.slice().reverse().map(e => `<div class="frow k-${esc(e.kind)}" data-tip="<b>${tesc(e.kind)}</b> · ${tesc(e.agent)}${e.id ? ' · ' + tesc(e.id) : ''} · ${hms(e.t)}<br>${tesc(kindTip(e.kind))}"><span class="t">${hms(e.t)}</span><span class="${acls(e.agent)}">${esc(e.agent)}</span><span class="kind${e.kind === 'phase' ? ' ph-' + phaseKind(e.msg) : ''}">${esc(e.kind)}</span><span class="id">${esc(e.id)}</span><span class="msg">${esc(e.msg)}</span></div>`).join('');
   $('livebadge').textContent = `${rows.length}${total > rows.length ? ' of ' + total : ''} events`;
 }
 

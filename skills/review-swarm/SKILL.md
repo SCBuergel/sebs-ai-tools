@@ -77,15 +77,25 @@ Then edit `$SW/PROTOCOL.md`: fill in the Task section (what the swarm reviews
 for, and what a reviewer needs to know to judge a finding) and the Accepted
 tradeoffs section (documented owner decisions reviewers must not report
 again; write "none recorded" otherwise). Adapt `$SW/severity.md` to the
-project's trust boundaries if the default scale does not fit. Tell the user
-how to watch:
-
-```sh
-python3 $SW/dash.py            # terminal
-python3 $SW/dashweb.py         # then open http://127.0.0.1:8765/
-```
+project's trust boundaries if the default scale does not fit.
 
 ## 4. Start the agents
+
+Before the first agent, start the web dashboard and post its link, so the
+user can watch the swarm from its first event:
+
+1. If `curl -s http://127.0.0.1:8765/swarm.json` returns this swarm's
+   `swarm.json` (a rerun, or a server the user started), keep that server.
+   Otherwise run `python3 $SW/dashweb.py <port>` with the Bash tool in the
+   background, port 8765 or, if that is taken, the next free one.
+2. Check with `curl -sf http://127.0.0.1:<port>/` that it serves the page.
+3. Post the link to the user as its own line, `Web dashboard:
+   http://127.0.0.1:<port>/`, together with the terminal dashboard command
+   `python3 $SW/dash.py`. Write the link to `$SW/web.url`, so a session that
+   takes over can post it again.
+
+If the server does not start, say so with its error, give the user the
+command to start it themselves, and go on: the swarm does not need it.
 
 Fill each brief from `roles/` by replacing its `{{...}}` placeholders
 (`{{SW}}`, `{{REPO}}`, `{{SOURCE}}`, `{{N}}`, `{{N_DEV}}`, `{{AREA}}`,
@@ -162,6 +172,8 @@ dev's message is lost, `$SW/lastmsg <agent id>` prints its last reply.
 
 Another session can take over: read `$SW/PROTOCOL.md`, `$SW/ids.txt` and the
 tail of `$SW/events.jsonl`, then send the running agents a short note that
-this session is now the dispatcher. Agents started by a session that has
-ended cannot be resumed; start replacements with the same briefs and note
-the replacement in `ids.txt`.
+this session is now the dispatcher. Check that the link in `$SW/web.url`
+still serves the page (start the server again as in section 4 if not) and
+post it to the user. Agents started by a session that has ended cannot be
+resumed; start replacements with the same briefs and note the replacement in
+`ids.txt`.

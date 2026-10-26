@@ -105,7 +105,8 @@ for it: "run a review swarm for the security of this repository", or
    memory), splits the task into areas, and runs `swarm-init`, which creates a
    swarm folder with the tools and the protocol, branch `swarm-review`, a
    read-only worktree of the starting point, and one worktree per dev;
-2. starts the reviewers (read-only, one area each) and the coordinator
+2. starts the web dashboard and posts its link, then the reviewers
+   (read-only, one area each) and the coordinator
    (read-only; validates each finding against the code, rates it, and later
    checks each fix), then the devs;
 3. passes messages between them and records every state change in the swarm
@@ -120,7 +121,8 @@ You watch it live. In a terminal, `python3 $SW/dash.py` shows the agents,
 the findings pipeline (reported, validated, dev, coordinator, agreed), each
 dev's review-loop step, machine memory and load, and the event feed; `python3
 $SW/dashweb.py` serves the same as a web page on http://127.0.0.1:8765/ with
-expandable findings and tooltips. `$SW` is the swarm folder the session names.
+expandable findings and tooltips; the dispatcher starts it and posts the link
+before the first agent starts. `$SW` is the swarm folder the session names.
 You can also talk to any agent directly, for example to ask the optional
 `dash` agent for a change to the dashboards.
 
