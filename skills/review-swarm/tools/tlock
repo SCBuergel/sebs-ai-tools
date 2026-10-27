@@ -7,7 +7,8 @@
 # dashboards. NAME (or $SWARM_AGENT) says who runs it, e.g. dev2, dev2-reviewer or final-reviewer.
 # Every agent starts every test run through this, so at most that many runs share the machine.
 # It logs each run as `test` events for the dashboards' activity view: "wait" when no slot is free,
-# "start slot=N CMD", "end slot=N rc=RC took=Ss", or "gave up waiting" when it is stopped before a slot.
+# "start slot=N CMD", "end slot=N rc=RC took=Ss head=SHA", or "gave up waiting" when it is stopped before a
+# slot. head is the commit the run tested (with "+dirty" for uncommitted changes); ffmerge checks it.
 set -u
 S=$(dirname "$(realpath "$0")")
 MEM=${SWARM_TEST_MEM:-2G}
@@ -34,6 +35,8 @@ while :; do
 		exec {fd}>"$f"
 		if flock -n "$fd"; then
 			start=$(date +%s)
+			head=$(git rev-parse HEAD 2>/dev/null || echo none)
+			[ -z "$(git status --porcelain 2>/dev/null)" ] || head="$head+dirty"
 			trap - EXIT
 			ev start slot="$i" "$@"
 			python3 -c 'import json, sys; print(json.dumps({"slot": int(sys.argv[1]), "pid": int(sys.argv[2]), '\
@@ -47,7 +50,7 @@ while :; do
 				wait "$child"; rc=$?
 				kill -0 "$child" 2>/dev/null || break
 			done
-			rm -f "$S/slots/$i.json"; ev end slot="$i" rc=$rc took=$(( $(date +%s) - start ))s; exit "$rc"
+			rm -f "$S/slots/$i.json"; ev end slot="$i" rc=$rc took=$(( $(date +%s) - start ))s head="$head"; exit "$rc"
 		fi
 		exec {fd}>&-
 	done

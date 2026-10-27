@@ -204,8 +204,23 @@ def box(title, lines, w, col):
 
 
 # Stages of the whole swarm, logged by the dispatcher with `ev dispatcher stage - "<stage> <detail>"`.
-STAGE_COL = {"setup": 245, "reviewing": 81, "final-review": 177, "final-fix": 220, "merge": 214, "done": 46}
+STAGE_COL = {"setup": 245, "reviewing": 81, "paused": 208, "wind-down": 172, "final-review": 177, "final-fix": 220,
+             "merge": 214, "done": 46, "stopped": 160}
+ENDED = ("done", "stopped")  # stages after which nobody works and no pass runs
 OPEN = ("reported", "validating", "valid", "dev", "coord", "rev")  # finding states that still need work
+QUIET = 20 * 60  # an agent counted as working with no event of its own for this long is flagged quiet
+
+
+def stage_name(msg):
+    """(stage, detail) of a stage event, with natural spellings normalised: "final review" -> final-review."""
+    w = msg.split()
+    if not w:
+        return "", ""
+    name, rest = w[0].lower(), w[1:]
+    if name in ("final", "wind") and rest and rest[0].lower() in ("review", "fix", "down"):
+        name, rest = f"{name}-{rest[0].lower()}", rest[1:]
+    name = {"pause": "paused", "stop": "stopped", "winddown": "wind-down", "finished": "done"}.get(name, name)
+    return name, " ".join(rest)
 
 
 def pass_event(e, passes):
@@ -246,7 +261,17 @@ def state_of(evs):
             if r in agents:
                 agents[r]["done"] = False  # a fresh reviewer took the area over
             continue
-        st = agents.setdefault(a, {"msg": "", "t": e["t"], "done": False, "n": 0, "busy": False, "fid": ""})
+        st = agents.setdefault(a, {"msg": "", "t": e["t"], "done": False, "n": 0, "busy": False, "fid": "", "seen": e["t"]})
+        st["seen"] = e["t"]
+        owner = a[:-len("-reviewer")] if a.startswith("dev") and a.endswith("-reviewer") else ""
+        if owner and owner in agents:
+            agents[owner]["seen"] = e["t"]  # a dev's commit-reviewer at work counts as the dev's activity
+        if k == "test":
+            continue
+        if k == "stopped":  # the dispatcher stopped the agent, or found its session gone
+            st.update(msg="stopped: " + e["msg"], t=e["t"], kind=k, stopped=True, busy=False)
+            continue
+        st["stopped"] = False
         if k in ("status", "reported", "done", "idle"):
             st.update(msg=e["msg"], t=e["t"], fid=i, kind=k)
         elif k == "phase":
@@ -254,7 +279,8 @@ def state_of(evs):
         if a.startswith("R"):
             st["done"] = st["done"] or k == "done"
         else:
-            st["busy"] = k not in ("idle", "done")
+            # a verdict as the last status (the final reviewer's "APPROVED ...") ends the agent's work
+            st["busy"] = k not in ("idle", "done") and not (k == "status" and e["msg"].split()[:1] in (["APPROVED"], ["NOT"]))
         if k == "reported":
             st["n"] += 1
         if i:
@@ -284,7 +310,7 @@ def state_of(evs):
     return agents, focus, findings, order, notes, stage, passes
 
 
-def area(r, agents, findings, passes):
+def area(r, agents, findings, passes, sname=""):
     """A reviewer's area: (label, colour, finished, open findings, agreed findings)."""
     mine = [f for f in findings.values() if f["by"] == r]
     opn = sum(f["state"] in OPEN for f in mine)
@@ -293,6 +319,8 @@ def area(r, agents, findings, passes):
     verifying = next((i for i, f in findings.items() if f["by"] == r and f["state"] == "rev"), None)
     if p and p["state"] in ("finished", "stopped"):
         return f"area {p['state']} after pass {p['pass']}", 46, True, opn, agreed
+    if p and sname in ENDED:
+        return f"pass {p['pass']} ended with the swarm ({sname})", 245, True, opn, agreed
     if verifying:
         return f"verifying the fix of {verifying}", 117, False, opn, agreed
     if not st:
@@ -374,6 +402,33 @@ def chain(steps, n):
     return build(steps[lo:], lo) if steps else ""
 
 
+def agent_state(a, st, findings, sname, now, held):
+    """(state, label) of an agent: working, quiet (working but no event for QUIET), waiting (a dev whose finding
+    moved on), paused, stopped or idle. The dispatcher logs `ev AGENT stopped - "<why>"` when it stops one."""
+    if not st:
+        return "idle", "not started"
+    if st.get("stopped"):
+        return "stopped", st["msg"]
+    if sname in ENDED:
+        return "idle", f"swarm {sname}"
+    if sname == "paused":
+        return "paused", "paused with the swarm"
+    if a.startswith("R") and a[1:].isdigit():
+        working = not st["done"] or any(f["by"] == a and f["state"] == "rev" for f in findings.values())
+    elif a in DEVS:
+        f = findings.get(st["fid"])
+        if st["busy"] and f and f["state"] not in ("reported", "validating", "valid", "dev"):
+            return "waiting", f"waiting for its next finding ({st['fid']} is {f['state']})"
+        working = st["busy"]
+    else:
+        working = st["busy"]
+    if not working:
+        return "idle", ""
+    if a not in held and now - st.get("seen", st["t"]) > QUIET:
+        return "quiet", f"quiet for {ago(st.get('seen', st['t']), now)}: no event, no test run; stopped or stalled?"
+    return "working", ""
+
+
 NOTE = ""  # a warning shown under the header, e.g. an edited dash.py that was refused
 
 
@@ -399,7 +454,8 @@ def render(evs, tick):
     done = sum(f["state"] == "agreed" for f in findings.values())
     rej = sum(f["state"] in ("invalid", "duplicate") for f in findings.values())
     unres = sum(f["state"] == "unresolved" for f in findings.values())
-    revdone = sum(1 for r in REVIEWERS if area(r, agents, findings, passes)[2])
+    sname, sdetail = stage_name(stage["msg"]) if stage else ("", "")
+    revdone = sum(1 for r in REVIEWERS if area(r, agents, findings, passes, sname)[2])
     head = (f" Areas {B}{revdone}/{len(REVIEWERS)}{R} finished   Findings {B}{len(findings)}{R} "
             f"({fg(46)}{done} agreed{R}, {fg(177)}{len(valid) - done - unres} in pipeline{R}, "
             f"{fg(240)}{rej} rejected{R}, {fg(196)}{unres} unresolved{R})")
@@ -421,12 +477,25 @@ def render(evs, tick):
     mc = machine()
     wt = waiting(evs, mc, now)
     out.append(machine_line(mc, now) + (f"   {fg(208)}{B}{len(wt)} waiting for a slot{R}: {', '.join(wt)}" if wt else ""))
+    held = {str(j.get("who", "")).removesuffix("-reviewer") for j in mc["slots"]}
+    others = sorted(a for a in {e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"}
+                    if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer only logs test runs
+    roster_all = REVIEWERS + ["coordinator"] + DEVS + others
+    states = {a: agent_state(a, agents.get(a), findings, sname, now, held) for a in roster_all}
+    cnt = lambda s: [a for a in roster_all if states[a][0] == s]
+    summ = (f" Agents   {fg(220)}{B}{len(cnt('working'))} working{R}"
+            + (f"   {fg(208)}{B}{len(cnt('quiet'))} quiet {QUIET // 60}m+{R} ({', '.join(cnt('quiet'))})" if cnt("quiet") else "")
+            + (f"   {fg(196)}{len(cnt('stopped'))} stopped{R}" if cnt("stopped") else "")
+            + (f"   {fg(208)}{len(cnt('paused'))} paused{R}" if cnt("paused") else "")
+            + f"   {len(cnt('waiting'))} waiting for a finding   {DIM}{len(cnt('idle'))} idle{R}"
+            + f"   test slots {B}{len(mc['slots'])}/{mc['slot_count']}{R}")
+    out.append(summ)
 
     # Stage and narration
     if NOTE:
         out.append(" " + fg(196) + "⚠ " + R + cut(NOTE, W - 4))
     if stage:
-        name, _, detail = stage["msg"].partition(" ")
+        name, detail = sname, sdetail
         col = STAGE_COL.get(name, 245)
         out.append(" " + bgc(col) + fg(16) + B + f" {name.upper()} " + R + f" {B}{ago(stage['t'], now)}{R}  "
                    + cut(detail, W - len(name) - 16))
@@ -448,26 +517,28 @@ def render(evs, tick):
             icon, msg = fg(46) + "✔" + R, DIM + cut(st["msg"], leftw - 32) + R
         else:
             icon, msg = fg(220) + SPIN[(tick + idx) % len(SPIN)] + R, cut(st["msg"], leftw - 32)
-        label, lcol, fin, opn, agreed = area(r, agents, findings, passes)
+        label, lcol, fin, opn, agreed = area(r, agents, findings, passes, sname)
         if fin:
             icon = fg(46) + "✔" + R
         if label:
             msg = fg(lcol) + label + R
+        ast, alab = states[r]
+        if ast in ("quiet", "stopped", "paused") and not fin:
+            icon, msg = fg(208 if ast != "stopped" else 196) + {"quiet": "?", "stopped": "■", "paused": "‖"}[ast] + R, fg(208) + alab + R
         flag = fg(214 if opn else 240) + f"{opn}o" + R + DIM + "/" + R + fg(46 if agreed else 240) + f"{agreed}a" + R
         p = passes.get(r)
         ptxt = (fg(81) + f"p{p['pass']}" + R + DIM + f" {p['clean']}{'/' + str(until) if until else ''}✓ " + R) if p else ""
         left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {ptxt}{msg}")
     left.append("")
-    others = sorted(a for a in {e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"}
-                    if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer only logs test runs
     nw = max([11] + [len(a) for a in others])
     for a in ["coordinator"] + DEVS + others:
         st = dict(agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""}))
-        if a in DEVS and st["fid"] in findings and findings[st["fid"]]["state"] not in OPEN:
-            st["busy"] = False  # its finding is closed: the dev is idle even if it never said so
-        if a in others:
-            st["busy"] = st.get("kind") == "status"  # e.g. the final reviewer: busy only while it reports work
-        icon = fg(220) + SPIN[tick % len(SPIN)] + R if st["busy"] else fg(240) + "◌" + R
+        ast, alab = states[a]
+        st["busy"] = ast == "working"
+        if alab:
+            st["msg"] = alab
+        icon = {"working": fg(220) + SPIN[tick % len(SPIN)], "quiet": fg(208) + "?", "stopped": fg(196) + "■",
+                "paused": fg(208) + "‖"}.get(ast, fg(240) + "◌") + R
         fid = (B + f"{st['fid']:<6}" + R) if st["fid"] else " " * 6
         steps = steps_of(findings[st["fid"]]) if a in DEVS and st["busy"] and st["fid"] in findings else []
         tag = ptag(steps[-1]) + " " if steps else ""

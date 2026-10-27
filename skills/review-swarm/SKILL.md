@@ -27,8 +27,9 @@ Roles, each a subagent started with the Agent tool from the briefs under
 
 The tools under `tools/` are copied into the swarm folder (`$SW`): `ev`
 appends an event, `tlock` runs a test command in one of the shared test slots,
-`devqueue` turns coordinator verdicts into events and prints the dev queue,
-`lastmsg` prints an agent's last message, `dash.py` and `dashweb.py` are the
+`ffmerge` is how a dev fast-forwards `swarm-review` (it refuses an untested or
+changed-since-approval branch), `devqueue` turns coordinator verdicts into
+events and prints the dev queue, `lastmsg` prints an agent's last message, `dash.py` and `dashweb.py` are the
 dashboards, `swarm-init` and `swarm-clean` set up and tear down.
 
 ## 1. Check the ground
@@ -146,9 +147,27 @@ repeated passes. Never judge a finding yourself: forward, record, and resume.
 
 The dashboards show the latest `stage` as a banner with how long it has
 lasted, and the last three notes under it. Log one at every change, with
-the stage first and a one-line detail after it: `setup`, `reviewing`,
-`final-review` (for example `"final-review main..9e83e9b (55 commits),
-waiting on the final reviewer"`), `final-fix`, `merge`, `done`.
+the stage first and a one-line detail after it. The stages are `setup`,
+`reviewing`, `paused`, `wind-down`, `final-review` (for example
+`"final-review main..9e83e9b (55 commits), waiting on the final reviewer"`),
+`final-fix`, `merge`, `done` and `stopped`:
+
+- `paused` when the swarm stops for a while, for example at a usage limit;
+  the dashboards then show every agent paused. Log `reviewing` (or the stage
+  it was in) again when it resumes.
+- `wind-down` when the user asks to finish what is in progress and start
+  nothing new: log `"R5 <p> stopped"` for every pass still running, then
+  start no new pass.
+- `stopped` when the swarm ends without merging. After `done` or `stopped`
+  the dashboards count nobody as working and close any pass still open.
+
+The dashboards count an agent as working from its own events. Whenever you
+stop an agent (TaskStop), or find that its session is gone, log `$SW/ev
+<agent> stopped - "<why>"`, for example `$SW/ev dev3 stopped - "TaskStop,
+swarm paused"`; a new agent of that name clears it with its first event. An
+agent counted as working with no event and no test run for 20 minutes is
+shown as quiet: check it with `$SW/lastmsg <agent id>`, then resume it,
+replace it, or log it stopped.
 
 1. A reviewer reports `R3-2`: send the coordinator `VALIDATE R3-2`, log
    `validating`.
@@ -178,9 +197,14 @@ waiting on the final reviewer"`), `final-fix`, `merge`, `done`.
    "Repeated passes"). When every area is finished, the queue is empty and
    every dev is idle, go to section 6.
 
-A dev must not fast-forward `swarm-review` before its post-rebase test run
-has passed; remind it if the log shows `merge` before the tests ended. If a
-dev's message is lost, `$SW/lastmsg <agent id>` prints its last reply.
+A dev fast-forwards `swarm-review` only through `$SW/ffmerge`, which refuses
+unless the last test run on that exact HEAD passed and the branch is the
+change its commit-reviewer approved; if a dev reports a merge by other
+means, ask it to check with `ffmerge`. A dev also logs its reply as `$SW/ev
+devN idle <id> "DONE ..."` before it ends its turn, so a reply that never
+reached you shows up under `DEV REPORTS NOT ACTED ON` when you run
+`$SW/devqueue`; `$SW/lastmsg <agent id>` prints the full reply. The
+commit-reviewer's verdict for a dev may also land with you (step 4).
 
 ### Repeated passes
 
@@ -242,7 +266,10 @@ With `--one-pass`, an area is finished when its reviewer is done; log no
 3. Log `stage - "done <what was pushed>"`, then run `swarm-clean --swarm $SW
    --repo .` to remove the worktrees (including the per-pass ones) and dev
    branches. The log, findings and verdicts stay
-   in `$SW` for the record.
+   in `$SW` for the record. Never clean up before the final review is
+   APPROVED and merged: a final finding needs a dev and its worktree. If the
+   worktrees are gone anyway, run `swarm-init` again with the same options
+   on `swarm-review`; it recreates the missing dev worktrees.
 4. Report: what was pushed, every finding with its outcome, the optional
    items reviewers left, and what the local tests could not verify.
 

@@ -33,21 +33,31 @@ and anything a reviewer must know to judge a finding. -->
   there.
 - {{REPO}} on branch `swarm-review`: the integration tree. The coordinator reads it (`git log`,
   `git diff`, `git show`) to check fixes. Nobody edits files here. A dev whose change got APPROVED
-  rebases its branch onto `swarm-review` once more, reruns the full tests if that moved its commits
-  and waits for them to pass, then runs `git -C {{REPO}} merge --ff-only swarm-devN`; if that fails
-  because another dev got there first, it rebases and retries. A REVERT is done the same way: revert
-  commits on the dev branch, then fast-forward. Nobody switches branches, pushes, or resets this tree.
+  rebases its branch onto `swarm-review` once more, runs the full tests on that exact HEAD through
+  tlock and waits for them to pass, then runs `$SW/ffmerge devN <approved commit>`, the only way to
+  fast-forward `swarm-review`. ffmerge refuses if the last test run on HEAD did not pass, or if the
+  branch is no longer the change the commit-reviewer approved (a commit added after APPROVED, or a
+  rebase that had to change the code): that goes back to the same commit-reviewer first. If another
+  dev got there first, rebase, retest and run ffmerge again. A REVERT is done the same way: revert
+  commits on the dev branch, have them approved, then ffmerge. Nobody switches branches, pushes, or
+  resets this tree.
 
 ## Live status (everyone)
 Report what you are doing with
   $SW/ev <YOUR_NAME> status <FINDING_ID or -> "<short message>"
-at the start, about every few minutes of work, and when you finish. Names: R1..R{{N_REV}}, coordinator,
+at the start, at least every 10 minutes of work, and when you finish. The dashboards flag an agent
+that is counted as working but has had no event and no test run for 20 minutes as quiet (stopped or
+stalled?). Names: R1..R{{N_REV}}, coordinator,
 dev1..dev{{N_DEV}}. Keep messages under 100 characters, in plain words, for example "reading the policy
 section". Devs also record their review-loop step whenever it changes:
   $SW/ev devN phase <FINDING_ID> <step>
 with step one of implement, test, review-1, fix-1, review-2, fix-2, review-3, fix-3, review-4, fix-4,
 approved, merge, blocked ("review-k": round k is with the dev's commit-reviewer; "fix-k": the dev
-addresses round k's findings; "merge": rebase and fast-forward of swarm-review).
+addresses round k's findings; "merge": rebase and fast-forward of swarm-review). Before a dev ends
+its turn with a reply (DONE, BLOCKED, DISPUTE, REVERTED), it logs the reply's first line:
+  $SW/ev devN idle <FINDING_ID> "DONE base=... commits=..."
+so the dispatcher finds it even if the reply itself does not reach it. The final reviewer's verdict
+is logged as `done`, not `status`.
 
 ## Findings
 A reviewer writes each finding to $SW/queue/<id>.json (id = its name and a running number, R3-2)

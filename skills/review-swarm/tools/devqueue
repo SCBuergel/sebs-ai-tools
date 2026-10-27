@@ -4,20 +4,24 @@
 The coordinator writes its verdict on a finding to val/<id>.txt, first line `VALID <id> <severity>`,
 `INVALID <id>` or `DUPLICATE <id> of <other>`. This records each verdict not yet in the log as a
 dispatcher event (valid / invalid / duplicate) and prints the findings waiting for a dev, highest
-severity first, then the ones still unvalidated and the ones no verdict file exists for. Run it
-whenever the coordinator reported.
+severity first, then the ones still unvalidated and the ones no verdict file exists for, and the dev
+reports (DONE, BLOCKED, ...) a dev logged as `idle` that the dispatcher has not acted on yet: a reply that
+did not reach the dispatcher. Run it whenever the coordinator or a dev reported.
 """
 import glob, json, os, subprocess
 
 D = os.path.dirname(os.path.abspath(__file__))
 RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
 evs = [json.loads(l) for l in open(os.path.join(D, "events.jsonl")) if l.strip()]
-state, arrival = {}, {}
+state, arrival, report = {}, {}, {}
 for e in evs:
     if e["id"]:
         arrival.setdefault(e["id"], len(arrival))
         if e["agent"] == "dispatcher":
             state[e["id"]] = (e["kind"], e["msg"])
+            report.pop(e["id"], None)  # the dispatcher acted on the finding after the dev's report
+        elif e["agent"].startswith("dev") and e["kind"] == "idle" and e["msg"].split()[:1] in (["DONE"], ["BLOCKED"], ["DISPUTE"], ["REVERTED"]):
+            report[e["id"]] = f'{e["agent"]}: {e["msg"]}'
 for p in sorted(glob.glob(os.path.join(D, "val", "*.txt"))):
     i = os.path.basename(p)[:-4]
     if i.endswith(".check"):
@@ -35,3 +39,6 @@ q.sort(key=lambda i: (RANK.get(state[i][1], 9), arrival.get(i, len(arrival))))  
 print("DEV QUEUE:", " ".join(f"{i}({state[i][1]})" for i in q) or "empty")
 print("UNVALIDATED:", " ".join(i for i, (k, m) in state.items() if k in ("reported", "validating")) or "none",
       "| NEW:", " ".join(i for i in arrival if i not in state) or "none")
+pending = [f"{i} ({m})" for i, m in report.items() if state.get(i, ("",))[0] == "dev"]
+if pending:
+    print("DEV REPORTS NOT ACTED ON:", "; ".join(pending))

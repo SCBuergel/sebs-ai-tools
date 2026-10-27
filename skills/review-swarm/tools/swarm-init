@@ -51,10 +51,10 @@ if [ -z "$slots" ] && [ -s "$swarm/slots/count" ]; then slots=$(cat "$swarm/slot
 [ -n "$slots" ] || slots=$(( ($(nproc) + 1) / 2 )); [ "$slots" -ge 1 ] || slots=1
 
 mkdir -p "$swarm" "$swarm/queue" "$swarm/val" "$swarm/slots"
-for f in ev tlock devqueue lastmsg dash.py dash.html dashweb.py; do
+for f in ev tlock ffmerge devqueue lastmsg dash.py dash.html dashweb.py; do
 	[ -e "$swarm/$f" ] || cp "$here/$f" "$swarm/$f"
 done
-chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/devqueue" "$swarm/lastmsg"
+chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/ffmerge" "$swarm/devqueue" "$swarm/lastmsg"
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"

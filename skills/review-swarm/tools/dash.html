@@ -139,6 +139,9 @@ main.focus section:not(.focused) { display: none; }
 .state.done { background: var(--good); box-shadow: 0 0 6px var(--good); }
 .state.busy { background: var(--yellow); }
 .state.wait { background: var(--cyan); }
+.state.quiet { background: var(--orange); }
+.state.stopped { background: var(--critical); border-radius: 1px; }
+.state.paused { background: var(--warn); border-radius: 1px; }
 .sub { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
 
 /* Pipeline */
@@ -454,6 +457,7 @@ const KIND = {
   note: 'Free-text narration, usually the dispatcher explaining a decision.',
   phase: 'A review-loop step of a dev: implement, test, review-k, fix-k, approved, merge or blocked.',
   stage: 'The dispatcher moved the whole swarm to a new stage; the banner at the top shows the latest.',
+  stopped: 'The dispatcher stopped this agent, or found its session gone; it does no more work until a new agent of that name reports.',
   test: 'A test run through tlock: waiting for a slot (wait), holding one (start slot=N), finished (end slot=N rc=…), or gave up waiting.',
   pass: 'Repeated passes: a fresh reviewer took an area over (started), a pass ended (clean, not clean), or the area is finished or stopped.',
 };
@@ -461,11 +465,25 @@ const KIND = {
 const STAGE = {
   setup:          ['var(--ink-2)', 'Setting up: worktrees, protocol, dashboards, briefs.'],
   reviewing:      ['var(--cyan)', 'Reviewers audit their areas; the coordinator validates findings and devs fix them.'],
+  paused:         ['var(--warn)', 'The dispatcher paused the swarm (for example at a usage limit); no agent works until it resumes.'],
+  'wind-down':    ['var(--orange)', 'No new passes start; the findings in progress are finished.'],
   'final-review': ['var(--violet)', 'Every finding is closed; one commit-reviewer reviews all fixes together before the push.'],
   'final-fix':    ['var(--yellow)', 'A dev fixes what the final review found (F-1, F-2, …); the final review then runs again.'],
   merge:          ['var(--orange)', 'The final review approved; the source branch is fast-forwarded and pushed if the rules allow.'],
   done:           ['var(--good)', 'The swarm is finished.'],
+  stopped:        ['var(--critical)', 'The swarm was stopped before it finished.'],
 };
+const ENDED = ['done', 'stopped'];  // stages after which nobody works and no pass runs
+const QUIET = 20 * 60;  // an agent counted as working with no event of its own for this long is flagged quiet
+// "<stage> <detail>" with natural spellings normalised: "final review ..." is final-review, "pause" is paused.
+function stageName(msg) {
+  const w = String(msg || '').split(/\s+/).filter(Boolean);
+  if (!w.length) return ['', ''];
+  let name = w[0].toLowerCase(), rest = w.slice(1);
+  if (['final', 'wind'].includes(name) && ['review', 'fix', 'down'].includes((rest[0] || '').toLowerCase())) { name += '-' + rest[0].toLowerCase(); rest = rest.slice(1); }
+  name = {pause: 'paused', stop: 'stopped', winddown: 'wind-down', finished: 'done'}[name] || name;
+  return [name, rest.join(' ')];
+}
 const OPEN = ['reported','validating','valid','dev','coord','rev'];  // finding states that still need work
 const kindTip = k => KIND[k] || (STATE[k] ? 'Dispatcher: finding is now "' + STATE[k][0] + '". ' + STATE[k][1] : 'An event kind this page has no description for.');
 const ROLE_TIP = {
@@ -584,12 +602,13 @@ function stateOf() {
 }
 
 // A reviewer's area: what it is doing, whether it is finished, and its findings still open and agreed.
-function areaOf(r, agents, findings, passes) {
+function areaOf(r, agents, findings, passes, sname = '') {
   const mine = Object.entries(findings).filter(([i, f]) => f.by === r);
   const open = mine.filter(([i, f]) => OPEN.includes(f.state)).length, agreed = mine.filter(([i, f]) => f.state === 'agreed').length;
   const st = agents[r], p = passes[r], verifying = mine.find(([i, f]) => f.state === 'rev');
   const res = (label, tip, finished, cls) => ({label, tip, finished, cls, open, agreed, p});
   if (p && p.state !== 'running') return res(`area ${p.state}`, `The area is ${p.state} after pass ${p.pass}${p.state === 'stopped' ? ' (stopped by the user)' : ''}.`, true, 'done');
+  if (p && ENDED.includes(sname)) return res(`ended with the swarm`, `Pass ${p.pass} was still open when the swarm ${sname === 'done' ? 'finished' : 'was stopped'}.`, true, '');
   if (verifying) return res(`verifying ${verifying[0]}`, `The reviewer checks the fix of its finding ${verifying[0]}.`, false, 'busy');
   if (!st) return res('not started', 'No event from this reviewer yet.', false, '');
   if (st.done && open) return res('kept for VERIFY', `Its review is done, but ${open} of its findings are still open: the agent is kept to check their fixes (VERIFY).`, false, 'wait');
@@ -599,10 +618,10 @@ function areaOf(r, agents, findings, passes) {
 }
 
 function stageBar(stage, notes, now) {
-  const [name, ...rest] = stage ? stage.msg.split(' ') : [''];
+  const [name, detail] = stage ? stageName(stage.msg) : [''], rest = [detail];
   const [col, tip] = STAGE[name] || ['var(--ink-3)', stage ? 'A stage this page has no description for.' : 'The dispatcher has not logged a stage yet: $SW/ev dispatcher stage - "<stage> <detail>".'];
   $('stagebar').style.setProperty('--stage', col);
-  $('stagebar').innerHTML = `<div class="now" data-tip="<b>Stage</b><br>${tesc(tip)}<br>Stages: setup → reviewing → final-review ⇄ final-fix → merge → done."><span class="sname">${esc(name || 'no stage')}</span>${stage ? `<span class="sfor">for ${ago(stage.t, now)}</span>` : ''}<span class="sdetail">${esc(rest.join(' '))}</span></div>` +
+  $('stagebar').innerHTML = `<div class="now" data-tip="<b>Stage</b><br>${tesc(tip)}<br>Stages: setup → reviewing (⇄ paused) → wind-down → final-review ⇄ final-fix → merge → done, or stopped."><span class="sname">${esc(name || 'no stage')}</span>${stage ? `<span class="sfor">for ${ago(stage.t, now)}</span>` : ''}<span class="sdetail">${esc(rest.join(' '))}</span></div>` +
     notes.slice(-3).reverse().map(n => `<div class="snote" data-tip="<b>Note</b> · ${tesc(n.agent)} · ${hms(n.t)}<br>${tesc(n.msg)}"><b>▶</b> ${esc(n.msg)} <span class="muted">· ${ago(n.t, now)} ago</span></div>`).join('');
 }
 
@@ -729,6 +748,7 @@ const ACT = {
   work:     ['var(--yellow)', 'implementing / fixing'],
   devrev:   ['var(--magenta)', 'its commit-reviewer reviews'],
   other:    ['var(--ink-2)', 'working'],
+  quiet:    ['repeating-linear-gradient(90deg, var(--orange) 0 3px, transparent 3px 6px)', `no event for ${QUIET / 60}m+ (stopped or stalled?)`],
 };
 function activity() {
   const lanes = {}, fst = {}, coordQ = new Map(), revDone = {};
@@ -741,8 +761,22 @@ function activity() {
     if (l.cur) l.segs.push(l.cur);
   };
   const isDev = a => /^dev\d+$/.test(a), isRev = a => /^R\d+$/.test(a);
+  let paused = false;
   for (const e of evs) {
     const a = e.agent, k = e.kind, i = e.id, t = e.t, msg = e.msg || '';
+    if (a !== 'dispatcher') {
+      lane(a.replace(/^(dev\d+)-reviewer$/, '$1')).seen = t;  // a dev's commit-reviewer at work counts for the dev
+      if (k !== 'test' && k !== 'stopped') lane(a).stopped = '';
+    }
+    if (k === 'stage') {  // paused, done and stopped end everyone's work; leaving paused picks it up again
+      const [name] = stageName(msg);
+      if (name === 'paused' || ENDED.includes(name)) {
+        for (const [n, l] of Object.entries(lanes)) if (l.cur) { l.resume = name === 'paused' ? [l.cur.kind, l.cur.why] : null; set(n, null, t); }
+      } else if (paused) for (const [n, l] of Object.entries(lanes)) if (l.resume) { set(n, l.resume[0], t, l.resume[1]); l.resume = null; }
+      paused = name === 'paused';
+      continue;
+    }
+    if (k === 'stopped') { lane(a).stopped = msg || 'stopped'; set(a, null, t); continue; }
     if (k === 'test') {
       const owner = a.replace(/^(dev\d+)-reviewer$/, '$1'), l = lane(owner), w = msg.split(/\s+/), slot = (msg.match(/slot=(\d+)/) || [])[1];
       if (w[0] === 'wait') l.waits[a] = t;
@@ -788,22 +822,43 @@ function activity() {
       continue;
     }
     if (a === 'coordinator' || a === 'dash') continue;
-    if (k === 'status') set(a, 'other', t, msg); else if (k === 'done' || k === 'idle') set(a, null, t);
+    // a verdict as the last status (the final reviewer's "APPROVED ...") ends its work
+    if (k === 'status') set(a, /^(NOT )?APPROVED\b/.test(msg) ? null : 'other', t, msg); else if (k === 'done' || k === 'idle') set(a, null, t);
   }
   // A test run whose end was never logged counts as running only while its slot is still held.
   const held = new Set((mach?.slots || []).map(j => String(j.agent || j.who) + '/' + j.slot));
   for (const l of Object.values(lanes)) for (const r of l.tests) if (!r.wait && r.b === null && !held.has(r.who + '/' + r.slot)) r.b = r.a;
+  // Working with no event of its own (or its commit-reviewer's) for QUIET and no test run going: stopped or stalled.
+  const tnow = Date.now() / 1000;
+  for (const [n, l] of Object.entries(lanes)) {
+    if (!l.cur || l.tests.some(r => !r.wait && r.b === null)) continue;
+    const q = Math.max(l.cur.a, l.seen ?? l.cur.a) + QUIET;
+    if (q < tnow) { l.cur.b = q; l.cur = {a: q, b: null, kind: 'quiet', why: `no event since ${hms(q - QUIET)}`}; l.segs.push(l.cur); }
+  }
   // A run still logged as waiting while a slot is free was stopped without logging (tlock retries every 3 s).
   const free = mach && mach.slots.length < mach.slot_count, now = Date.now() / 1000;
   for (const l of Object.values(lanes)) for (const [who, t0] of Object.entries(l.waits)) l.tests.push({a: t0, b: free && now - t0 > 10 ? t0 : null, who, wait: true});
   return lanes;
 }
 
+// What an agent is doing now, for the agent lists and the chips: working, quiet, waiting (a dev whose finding
+// moved on), paused, stopped or idle.
+function agentState(a, lanes, sname, agents, findings, now) {
+  const l = lanes[a], st = agents[a];
+  if (l?.stopped) return ['stopped', 'stopped: ' + l.stopped];
+  if (sname === 'paused') return ['paused', 'paused with the swarm'];
+  if (l?.cur?.kind === 'quiet') return ['quiet', `quiet for ${ago(l.cur.a - QUIET, now)}: no event, no test run; stopped or stalled?`];
+  if (l?.cur) return ['working', ''];
+  const f = st?.fid && findings[st.fid];
+  if (/^dev\d+$/.test(a) && f && st.kind !== 'idle' && !['reported', 'validating', 'valid', 'dev'].includes(f.state)) return ['waiting', `waiting for its next finding (${st.fid} is ${STATE[f.state]?.[0] || f.state})`];
+  return ['idle', ''];
+}
+
 const WINDOWS = [['30m', 1800], ['1h', 3600], ['3h', 10800], ['all', 0]];
 let winSel = store.get('actwin', 3600);
-function renderActivity(now, agentsOrder) {
-  const lanes = activity(), mc = mach, slotCount = mc ? mc.slot_count : 0;
-  const busy = Object.entries(lanes).filter(([a, l]) => l.cur);
+function renderActivity(now, agentsOrder, lanes, states) {
+  const mc = mach, slotCount = mc ? mc.slot_count : 0;
+  const busy = Object.entries(lanes).filter(([a, l]) => l.cur && l.cur.kind !== 'quiet' && states[a]?.[0] === 'working');
   const byKind = k => busy.filter(([a, l]) => l.cur.kind === k).map(([a]) => a);
   const testing = Object.values(lanes).flatMap(l => l.tests.filter(r => !r.wait && r.b === null));
   const waiting = Object.values(lanes).flatMap(l => l.tests.filter(r => r.wait && r.b === null));
@@ -816,7 +871,11 @@ function renderActivity(now, agentsOrder) {
     chip('commit-reviewers', byKind('devrev'), ACT.devrev[0], 'Devs whose change is with their own commit-reviewer (phase review-k); the dev waits.') +
     `<span class="chip" data-tip="<b>Test slots</b><br>Test runs holding a slot now, of the slot count in slots/count. Only test runs take a slot."><span class="dot" style="background:var(--violet)"></span>testing <b>${heldNow}/${slotCount || '?'}</b> slots</span>` +
     `<span class="chip" data-tip="<b>Waiting for a slot</b><br>Test runs queued in tlock because every slot is taken. If this stays above 0 while load is below the CPU count, raise slots/count.${waiting.length ? '<br>' + tesc(waiting.map(r => r.who).join(', ')) : ''}"><span class="dot" style="background:var(--orange)"></span>waiting <b>${waiting.length}</b></span>` +
-    chip('idle', agentsOrder.filter(a => !lanes[a]?.cur), 'var(--line-2)', 'Agents with nothing to do right now: reviewers whose pass is done, devs without a finding.');
+    chip(`quiet ${QUIET / 60}m+`, agentsOrder.filter(a => states[a][0] === 'quiet'), 'var(--orange)', `Counted as working, but no event and no test run for ${QUIET / 60} minutes: probably stopped (TaskStop, a session that ended) or stalled. The dispatcher should check it with lastmsg.`) +
+    chip('stopped', agentsOrder.filter(a => states[a][0] === 'stopped'), 'var(--critical)', 'Agents the dispatcher stopped (ev AGENT stopped).') +
+    (agentsOrder.some(a => states[a][0] === 'paused') ? chip('paused', agentsOrder.filter(a => states[a][0] === 'paused'), 'var(--warn)', 'The swarm is paused.') : '') +
+    chip('waiting for a finding', agentsOrder.filter(a => states[a][0] === 'waiting'), 'var(--cyan)', 'Devs whose last finding moved on (to the coordinator, the reviewer or agreed) and that have no new one yet.') +
+    chip('idle', agentsOrder.filter(a => states[a][0] === 'idle'), 'var(--line-2)', 'Agents with nothing to do right now: reviewers whose pass is done, devs without a finding, a finished final reviewer.');
   $('actbadge').textContent = `${busy.length} working · ${heldNow}/${slotCount || '?'} slots · ${waiting.length} waiting`;
 
   const t0 = evs.length ? evs[0].t : now, from = winSel ? Math.max(t0, now - winSel) : t0, span = Math.max(60, now - from);
@@ -835,8 +894,10 @@ function renderActivity(now, agentsOrder) {
     }).join('');
     const tests = segs(l.tests.filter(r => !r.wait), 't', null, r => `<b>${tesc(r.who)}</b> · test run in slot ${tesc(r.slot)}${r.rc !== undefined ? ', exit ' + tesc(r.rc) : ''}<br>${tesc(r.cmd || '')}<br>${hms(r.a)} – ${r.b ? hms(r.b) : 'now'} (${dur(r)})`) +
       segs(l.tests.filter(r => r.wait), 'w', null, r => `<b>${tesc(r.who)}</b> · waiting for a free test slot<br>${hms(r.a)} – ${r.b ? hms(r.b) : 'now'} (${dur(r)})`);
-    const nowTxt = l.cur ? ACT[l.cur.kind][1] + (l.cur.why ? ' · ' + l.cur.why : '') : 'idle';
-    return `<div class="lane"><span class="ln ${acls(a)}">${esc(a)}</span><div class="ltrack">${colored}${tests}</div><span class="lnow" style="color:${l.cur ? ACT[l.cur.kind][0] : 'var(--ink-3)'}">${esc(nowTxt)}</span></div>`;
+    const [sk, sl] = states[a] || ['idle', ''];
+    const nowTxt = sk === 'working' ? ACT[l.cur.kind][1] + (l.cur.why ? ' · ' + l.cur.why : '') : sl || 'idle';
+    const ncol = {working: l.cur && ACT[l.cur.kind][0], quiet: 'var(--orange)', stopped: 'var(--critical)', paused: 'var(--warn)', waiting: 'var(--cyan)'}[sk] || 'var(--ink-3)';
+    return `<div class="lane"><span class="ln ${acls(a)}">${esc(a)}</span><div class="ltrack">${colored}${tests}</div><span class="lnow" style="color:${ncol}" data-tip="<b>${tesc(a)}</b><br>${tesc(nowTxt)}">${esc(nowTxt)}</span></div>`;
   }).join('');
   const ticks = [0, .25, .5, .75, 1].map(f => `<span style="left:${f * 100}%">${f === 1 ? 'now' : '-' + ago(from + f * span, now)}</span>`).join('');
   $('axis').innerHTML = `<div></div><div>${ticks}</div><div></div>`;
@@ -864,9 +925,12 @@ function renderActivity(now, agentsOrder) {
 function render() {
   const now = Date.now()/1000;
   const {agents, focus, findings, order, notes, stage, passes} = stateOf();
-  for (const d of DEVS) if (agents[d] && findings[agents[d].fid] && !OPEN.includes(findings[agents[d].fid].state)) agents[d].busy = false;  // its finding is closed
   const until = +cfg.until_clean || 0;
-  const areasNow = Object.fromEntries(REVIEWERS.map(r => [r, areaOf(r, agents, findings, passes)]));
+  const [sname] = stage ? stageName(stage.msg) : [''];
+  const areasNow = Object.fromEntries(REVIEWERS.map(r => [r, areaOf(r, agents, findings, passes, sname)]));
+  const roll = [...REVIEWERS, 'coordinator', ...DEVS, ...[...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !/^dev\d+-reviewer$/.test(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort()];
+  const lanes = activity(), states = Object.fromEntries(roll.map(a => [a, agentState(a, lanes, sname, agents, findings, now)]));
+  for (const a of roll) if (agents[a]) agents[a].busy = states[a][0] === 'working';
   const mode = modeOf();
   $('mode').className = 'mode ' + mode.cls; $('mode').textContent = mode.short;
   $('mode').dataset.tip = `<b>Mode</b><br>${tesc(mode.long)}<br>From until_clean in swarm.json.`;
@@ -893,7 +957,7 @@ function render() {
     tile('In pipeline', pipe, 'Validated findings not yet agreed: queued for a dev, being fixed, or being checked.', 'var(--violet)') +
     tile('Rejected', rej, 'The coordinator judged the finding invalid or a duplicate; nothing to fix.', 'var(--ink-3)') +
     tile('Unresolved', unres, 'Fix failed after 4 dev rounds, or dev and coordinator disagree. Needs the user.', 'var(--critical)') +
-    tile('Devs busy', devbusy, `How many of the ${DEVS.length} devs currently hold a finding (their last event was not "idle").`, 'var(--yellow)', '/ ' + DEVS.length);
+    tile('Devs busy', devbusy, `How many of the ${DEVS.length} devs are working on a finding now: not idle, not waiting for their next finding, and not quiet for ${QUIET / 60} minutes.`, 'var(--yellow)', '/ ' + DEVS.length);
   const pct = n => valid.length ? (100*n/valid.length)+'%' : '0%';
   $('bar').innerHTML = `<i class="agreed" style="width:${pct(done)}"></i><i class="pipe" style="width:${pct(pipe)}"></i><i class="unres" style="width:${pct(unres)}"></i>`;
   $('barlabel').textContent = `${done} of ${valid.length} validated findings agreed`;
@@ -904,24 +968,25 @@ function render() {
     : '<span class="muted">none confirmed yet</span>');
 
   renderMachine(now);
-  renderActivity(now, [...REVIEWERS, 'coordinator', ...DEVS, ...[...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !/^dev\d+-reviewer$/.test(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort()]);
+  renderActivity(now, roll, lanes, states);
 
   // Agents
   $('reviewers').innerHTML = (REVIEWERS.length ? '' : '<div class="empty" data-tip="<b>No reviewers</b><br>swarm.json names none and none has written to the log yet.">no reviewers yet</div>') + REVIEWERS.map(r => {
-    const st = agents[r], open = openRevs.has(r), ar = areasNow[r], p = ar.p;
+    const st = agents[r], open = openRevs.has(r), p = areasNow[r].p, [sk, sl] = states[r] || ['idle', ''];
+    const ar = !areasNow[r].finished && ['quiet', 'stopped', 'paused'].includes(sk) ? {...areasNow[r], label: sk, tip: sl, cls: sk} : areasNow[r];
     const ptxt = p ? `pass ${p.pass} · ${p.clean}${until ? '/' + until : ''} clean` : '';
     return `<div class="arow rev${open ? ' open' : ''}" data-rev="${r}" data-tip="<b>${r}</b> — ${tesc(focus[r] || 'no focus reported')}<br><b>${tesc(ar.label)}</b>: ${tesc(ar.tip)}<br>${ar.open} open, ${ar.agreed} agreed of ${st?.n || 0} reported${p ? `<br>Pass ${p.pass}, ${p.clean} clean pass${p.clean === 1 ? '' : 'es'} in a row${until ? ' of ' + until + ' needed' : ''}` : ''}${st ? '<br>Last: ' + tesc(st.msg) : ''}<br><span class='muted'>click to ${open ? 'close' : 'open'} its area and findings</span>">
       <span class="state ${ar.cls}"></span><span class="name a-R">${r} <span class="n">⚑${st?.n || 0}</span></span><span class="focusarea">${esc(focus[r] || '')}</span><span class="rstat">${ptxt ? esc(ptxt) + ' · ' : ''}<b style="color:${ar.open ? 'var(--warn)' : 'var(--ink-3)'}">${ar.open} open</b> · <b style="color:${ar.agreed ? 'var(--good)' : 'var(--ink-3)'}">${ar.agreed} agreed</b> · ${esc(ar.label)}</span><span class="age">${st ? ago(st.t, now) : ''}</span></div>` +
       (open ? revDetail(r, order.filter(i => findings[i].by === r), findings) : '');
   }).join('');
   const others = [...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !/^dev\d+-reviewer$/.test(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort();
-  for (const a of others) if (agents[a]) agents[a].busy = agents[a].kind === 'status';  // e.g. the final reviewer: busy only while it reports work
   $('team').innerHTML = ['coordinator', ...DEVS, ...others].map(a => {
     const st = agents[a] || {msg: DEVS.includes(a) ? 'not started' : 'waiting', t: now, busy: false, fid: ''};
+    const [sk, sl] = states[a] || ['idle', ''], shown = sl || st.msg;
     const f = st.fid && findings[st.fid];
     const steps = DEVS.includes(a) && st.busy && f ? stepsOf(f) : [];
-    return `<div class="arow team" data-tip="<b>${a}</b><br>${tesc(roleTip(a))}${st.fid ? '<br>Holding <b>'+tesc(st.fid)+'</b>' + (f ? ': ' + tesc(f.title) : '') : ''}<br>Last: ${tesc(st.msg)}">
-      <span class="state ${st.busy ? 'busy' : ''}"></span><span class="name ${acls(a)}">${a}</span><span class="fid">${esc(st.fid || '')}</span><span>${steps.length ? pill(steps[steps.length-1]) : ''}</span><span class="msg">${esc(st.msg)}</span><span class="age">${ago(st.t, now)}</span>${steps.length ? `<span class="loop">${chain(steps)}</span>` : ''}</div>`;
+    return `<div class="arow team" data-tip="<b>${a}</b><br>${tesc(roleTip(a))}${st.fid ? '<br>Holding <b>'+tesc(st.fid)+'</b>' + (f ? ': ' + tesc(f.title) : '') : ''}${sl ? '<br><b>' + tesc(sk) + '</b>: ' + tesc(sl) : ''}<br>Last: ${tesc(st.msg)}">
+      <span class="state ${sk === 'working' ? 'busy' : sk === 'waiting' ? 'wait' : sk}"></span><span class="name ${acls(a)}">${a}</span><span class="fid">${esc(st.fid || '')}</span><span>${steps.length ? pill(steps[steps.length-1]) : ''}</span><span class="msg"${sk !== 'working' && sl ? ` style="color:${{quiet: 'var(--orange)', stopped: 'var(--critical)', paused: 'var(--warn)'}[sk] || 'var(--ink-3)'}"` : ''}>${esc(shown)}</span><span class="age">${ago(st.t, now)}</span>${steps.length ? `<span class="loop">${chain(steps)}</span>` : ''}</div>`;
   }).join('');
   const inrev = DEVS.filter(d => agents[d]?.busy && findings[agents[d].fid] && phaseKind(stepsOf(findings[agents[d].fid]).slice(-1)[0] || '') === 'review').length;
   $('agentsbadge').textContent = `${revdone}/${REVIEWERS.length} areas finished · ${devbusy}/${DEVS.length} devs busy · ${inrev} in review`;
