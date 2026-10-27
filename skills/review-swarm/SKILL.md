@@ -135,8 +135,8 @@ agent; a dev's commit-reviewer inherits the dev's.
 ## 5. Dispatch
 
 When the first reviewer starts, log `$SW/ev dispatcher stage - "reviewing <N>
-areas"`. Run this loop until every area is finished (see "Repeated
-passes") and every finding is agreed, rejected or unresolved. Record each transition with `$SW/ev dispatcher <kind> <id>
+areas"`. Run this loop until every area is finished (see
+"Repeated passes") and every finding is agreed, rejected or unresolved. Record each transition with `$SW/ev dispatcher <kind> <id>
 "<msg>"`, kinds `validating`, `valid <severity>` (written by `devqueue`),
 `invalid`, `duplicate`, `dev` (handed to a dev), `coord` (fix being checked
 by the coordinator), `rev` (by the reporting reviewer), `agreed`,
@@ -192,9 +192,10 @@ again on the fixed tree, until `until_clean` passes in a row (2 by default)
 have no finding the coordinator accepted. The fresh reviewer starts with no
 memory of earlier passes, so that what the earlier reviewers learned does not
 steer it: it gets the same brief, and nothing about earlier findings. The
-coordinator rejects a finding it rejected before again. With `--one-pass`,
-an area is finished when its reviewer is done; skip the `pass` events. Track it with `pass` events (id `-`; the message starts
-with the reviewer), which the dashboards turn into a pass column per area:
+coordinator rejects a finding it rejected before again, unless the new report
+brings a new argument. Track the passes with `pass` events (id `-`; the
+message starts with the reviewer), which the dashboards turn into a pass
+column per area:
 
 - `$SW/ev dispatcher pass - "R3 1 started"` when the first reviewer of the
   area starts.
@@ -208,6 +209,9 @@ with the reviewer), which the dashboards turn into a pass column per area:
   `"R3 <p+1> started"`. A VERIFY goes to the reviewer of the pass that
   reported the finding while it exists.
 - If the user stops an area early: `"R3 <p> stopped"`.
+
+With `--one-pass`, an area is finished when its reviewer is done; log no
+`pass` events.
 
 ## 6. Finish
 
