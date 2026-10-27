@@ -13,15 +13,18 @@ S=$(dirname "$(realpath "$0")")
 MEM=${SWARM_TEST_MEM:-2G}
 AS=${SWARM_AGENT:-}
 if [ "${1:-}" = --as ]; then AS=${2:-}; shift 2 || shift; fi
-ev() { "$S/ev" "${AS:-$(basename "$PWD")}" test - "$@" 2>/dev/null || true; }
-trap 'exit 143' TERM INT HUP  # so the EXIT trap below still logs when the run is stopped
+if [ -z "$AS" ]; then  # without a name: the worktree folder under the swarm folder (dev2), as dash.py's slots() names it
+	case "$PWD/" in "$S"/*) AS=${PWD#"$S"/}; AS=${AS%%/*} ;; *) AS=$(basename "$PWD") ;; esac
+fi
+ev() { "$S/ev" "$AS" test - "$@" 2>/dev/null || true; }
+trap 'exit 130' INT; trap 'exit 143' TERM HUP  # stopped while waiting: the EXIT trap logs "gave up waiting"
 waiting=
-run() {
+run() {  # run in the background, so exec: the job's pid is the test command itself and a signal reaches it
 	if command -v systemd-run >/dev/null; then
-		systemd-run --user --scope -q -p MemoryMax="$MEM" "$@"
+		exec systemd-run --user --scope -q -p MemoryMax="$MEM" "$@"
 	else
 		echo "tlock: systemd-run not found, running without a memory cap" >&2
-		"$@"
+		exec "$@"
 	fi
 }
 while :; do
@@ -31,13 +34,19 @@ while :; do
 		exec {fd}>"$f"
 		if flock -n "$fd"; then
 			start=$(date +%s)
-			trap 'rm -f "$S/slots/$i.json"; ev end slot=$i rc=143 took=$(( $(date +%s) - start ))s' EXIT
+			trap - EXIT
 			ev start slot="$i" "$@"
 			python3 -c 'import json, sys; print(json.dumps({"slot": int(sys.argv[1]), "pid": int(sys.argv[2]), '\
 '"start": int(sys.argv[3]), "cwd": sys.argv[4], "agent": sys.argv[5], "cmd": " ".join(sys.argv[6:])}))' \
 				"$i" $$ "$start" "$PWD" "$AS" "$@" > "$S/slots/$i.json"
-			run "$@"; rc=$?
-			trap - EXIT
+			# In the background, so that a signal to tlock is passed on to the test command at once; tlock
+			# then waits for it to end and logs its real exit code.
+			run "$@" <&0 & child=$!
+			trap 'kill -TERM $child 2>/dev/null' TERM INT HUP
+			while :; do
+				wait "$child"; rc=$?
+				kill -0 "$child" 2>/dev/null || break
+			done
 			rm -f "$S/slots/$i.json"; ev end slot="$i" rc=$rc took=$(( $(date +%s) - start ))s; exit "$rc"
 		fi
 		exec {fd}>&-

@@ -120,18 +120,18 @@ for it: "run a review swarm for the security of this repository", or
    `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
    your rules allow, and cleans the worktrees up.
 
-You watch it live. In a terminal, `python3 $SW/dash.py` shows the swarm's
-mode (one pass, or repeated passes until K clean) and current stage
-(reviewing, final review, merge, ...) with the dispatcher's latest notes, the agents with each area's open and agreed findings,
-the findings pipeline (reported, validated, dev, coordinator, agreed), each
-dev's review-loop step, machine memory and load with who holds each test
-slot, and the event feed; `python3
+You watch it live. In a terminal, `python3 $SW/dash.py` shows the swarm's mode
+(one pass, or repeated passes until K clean) and current stage (reviewing,
+final review, merge, ...) with the dispatcher's latest notes, the agents with
+each area's open and agreed findings, the findings pipeline (reported,
+validated, dev, coordinator, agreed), each dev's review-loop step, machine
+memory and load with who holds each test slot, and the event feed; `python3
 $SW/dashweb.py` serves the same as a web page on http://127.0.0.1:8765/ with
 expandable findings, tooltips, and an activity timeline of which agents work
-when, their test runs and their waits for a test slot; the dispatcher starts it and posts the link
-before the first agent starts. `$SW` is the swarm folder the session names.
-You can also talk to any agent directly, for example to ask the optional
-`dash` agent for a change to the dashboards.
+when, their test runs and their waits for a test slot; the dispatcher starts
+it and posts the link before the first agent starts. `$SW` is the swarm folder
+the session names. You can also talk to any agent directly, for example to ask
+the optional `dash` agent for a change to the dashboards.
 
 The swarm is file-based: if the dispatcher session ends, a new session can
 take over from the folder, as the skill describes.
