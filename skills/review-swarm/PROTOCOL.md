@@ -33,13 +33,14 @@ and anything a reviewer must know to judge a finding. -->
   there.
 - {{REPO}} on branch `swarm-review`: the integration tree. The coordinator reads it (`git log`,
   `git diff`, `git show`) to check fixes. Nobody edits files here. A dev whose change got APPROVED
-  rebases its branch onto `swarm-review` once more, runs the full tests on that exact HEAD through
-  tlock and waits for them to pass, then runs `$SW/ffmerge devN <approved commit>`, the only way to
-  fast-forward `swarm-review`. ffmerge refuses if the last test run on HEAD did not pass, or if the
-  branch is no longer the change the commit-reviewer approved (a commit added after APPROVED, or a
-  rebase that had to change the code): that goes back to the same commit-reviewer first. If another
+  logs the approved commit with `$SW/ev devN approved <id> "<sha>"`, rebases its branch onto
+  `swarm-review` once more, runs the full tests on that exact HEAD through tlock and waits for them to
+  pass, then runs `$SW/ffmerge devN`, the only way to fast-forward `swarm-review`. ffmerge refuses if
+  the last run of the test command on HEAD did not pass, or if the branch is no longer the change at
+  the logged approved commit (a commit added after APPROVED, or a rebase that had to change the
+  code): that goes back to the same commit-reviewer first. If another
   dev got there first, rebase, retest and run ffmerge again. A REVERT is done the same way: revert
-  commits on the dev branch, have them approved, then ffmerge. Nobody switches branches, pushes, or
+  commits on the dev branch, have them approved, log the approval, then ffmerge. Nobody switches branches, pushes, or
   resets this tree.
 
 ## Live status (everyone)

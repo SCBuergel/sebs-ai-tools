@@ -27,8 +27,9 @@ Roles, each a subagent started with the Agent tool from the briefs under
 
 The tools under `tools/` are copied into the swarm folder (`$SW`): `ev`
 appends an event, `tlock` runs a test command in one of the shared test slots,
-`ffmerge` is how a dev fast-forwards `swarm-review` (it refuses an untested or
-changed-since-approval branch), `devqueue` turns coordinator verdicts into
+`ffmerge` is how a dev fast-forwards `swarm-review` (it refuses a branch
+without a passing test run on its HEAD, or changed since the approval the
+dev logged), `devqueue` turns coordinator verdicts into
 events and prints the dev queue, `lastmsg` prints an agent's last message, `dash.py` and `dashweb.py` are the
 dashboards, `swarm-init` and `swarm-clean` set up and tear down.
 
@@ -75,8 +76,14 @@ repository:
 
 ```sh
 <skill base directory>/tools/swarm-init --repo . --swarm $SW \
-    --reviewers N --devs M --slots S --title "<repo> review swarm"
+    --reviewers N --devs M --slots S --test-cmd "<full test command>" \
+    --title "<repo> review swarm"
 ```
+
+Pass the repository's full test command as `--test-cmd "<command>"`, exactly
+as the devs will run it after `tlock --as devN`: `ffmerge` then requires a
+passing run of that command on the HEAD it merges; without it any passing
+tlock run counts.
 
 By default each area is reviewed again and again by a fresh reviewer until 2
 passes in a row find nothing worth fixing (see "Repeated passes" below). Pass
@@ -198,9 +205,10 @@ replace it, or log it stopped.
    every dev is idle, go to section 6.
 
 A dev fast-forwards `swarm-review` only through `$SW/ffmerge`, which refuses
-unless the last test run on that exact HEAD passed and the branch is the
-change its commit-reviewer approved; if a dev reports a merge by other
-means, ask it to check with `ffmerge`. A dev also logs its reply as `$SW/ev
+unless the last run of the test command on that exact HEAD passed and the
+branch is the change at the approved commit the dev logged (`ev devN
+approved`). Every such merge shows as a `merged` event; a DONE without one
+was merged some other way: send the coordinator that with the CHECK. A dev also logs its reply as `$SW/ev
 devN idle <id> "DONE ..."` before it ends its turn, so a reply that never
 reached you shows up under `DEV REPORTS NOT ACTED ON` when you run
 `$SW/devqueue`; `$SW/lastmsg <agent id>` prints the full reply. The

@@ -457,6 +457,8 @@ const KIND = {
   note: 'Free-text narration, usually the dispatcher explaining a decision.',
   phase: 'A review-loop step of a dev: implement, test, review-k, fix-k, approved, merge or blocked.',
   stage: 'The dispatcher moved the whole swarm to a new stage; the banner at the top shows the latest.',
+  approved: 'A dev logged the commit its commit-reviewer approved; ffmerge only merges that change.',
+  merged: 'ffmerge fast-forwarded swarm-review to this dev\'s tested, approved HEAD.',
   stopped: 'The dispatcher stopped this agent, or found its session gone; it does no more work until a new agent of that name reports.',
   test: 'A test run through tlock: waiting for a slot (wait), holding one (start slot=N), finished (end slot=N rc=…), or gave up waiting.',
   pass: 'Repeated passes: a fresh reviewer took an area over (started), a pass ended (clean, not clean), or the area is finished or stopped.',
@@ -846,11 +848,11 @@ function activity() {
 function agentState(a, lanes, sname, agents, findings, now) {
   const l = lanes[a], st = agents[a];
   if (l?.stopped) return ['stopped', 'stopped: ' + l.stopped];
-  if (sname === 'paused') return ['paused', 'paused with the swarm'];
+  if (sname === 'paused' && st) return ['paused', 'paused with the swarm'];
   if (l?.cur?.kind === 'quiet') return ['quiet', `quiet for ${ago(l.cur.a - QUIET, now)}: no event, no test run; stopped or stalled?`];
   if (l?.cur) return ['working', ''];
   const f = st?.fid && findings[st.fid];
-  if (/^dev\d+$/.test(a) && f && st.kind !== 'idle' && !['reported', 'validating', 'valid', 'dev'].includes(f.state)) return ['waiting', `waiting for its next finding (${st.fid} is ${STATE[f.state]?.[0] || f.state})`];
+  if (/^dev\d+$/.test(a) && f && !['idle', 'done'].includes(st.kind) && !['reported', 'validating', 'valid', 'dev'].includes(f.state)) return ['waiting', `waiting for its next finding (${st.fid} is ${STATE[f.state]?.[0] || f.state})`];
   return ['idle', ''];
 }
 

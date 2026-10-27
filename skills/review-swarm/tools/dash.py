@@ -4,7 +4,7 @@
 Reads swarm.json (title, reviewer and dev counts), events.jsonl, queue/, val/ and slots/ next to this file.
 Standard library only. When this file changes on disk it self-tests the new version and re-executes itself.
 """
-import glob, json, os, shutil, subprocess, sys, textwrap, time, traceback
+import glob, json, os, re, shutil, subprocess, sys, textwrap, time, traceback
 
 SRC = os.path.realpath(__file__)
 D = os.path.dirname(SRC)
@@ -477,7 +477,7 @@ def render(evs, tick):
     mc = machine()
     wt = waiting(evs, mc, now)
     out.append(machine_line(mc, now) + (f"   {fg(208)}{B}{len(wt)} waiting for a slot{R}: {', '.join(wt)}" if wt else ""))
-    held = {str(j.get("who", "")).removesuffix("-reviewer") for j in mc["slots"]}
+    held = {re.sub(r"^(dev\d+)-reviewer$", r"\1", str(j.get("who", ""))) for j in mc["slots"]}
     others = sorted(a for a in {e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"}
                     if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer only logs test runs
     roster_all = REVIEWERS + ["coordinator"] + DEVS + others

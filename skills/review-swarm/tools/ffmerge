@@ -1,49 +1,68 @@
 #!/usr/bin/env bash
-# ffmerge devN APPROVED_COMMIT: fast-forward swarm-review to dev N's branch, only if that is safe.
+# ffmerge devN: fast-forward swarm-review to dev N's branch, only if that is safe.
 #
-# A dev runs this instead of `git merge --ff-only` once its commit-reviewer said APPROVED. It refuses unless
+# A dev runs this instead of `git merge --ff-only` once its commit-reviewer said APPROVED and the dev
+# logged that verdict's commit with `ev devN approved <id> "<sha>"` (before any rebase). It refuses unless
 #   - the dev's worktree is clean and its branch contains swarm-review (rebased onto it) and adds something;
-#   - the change on the branch (swarm-review..HEAD) is the change the reviewer approved: the same diff as
-#     APPROVED_COMMIT against its own base (git patch-id), so a commit added after approval, or a rebase
-#     that had to change the code, goes back to the reviewer first;
-#   - the last test run tlock logged for exactly this HEAD (by devN or devN-reviewer, no uncommitted
-#     changes) exited 0.
-# Then it runs the fast-forward in the integration tree. If another dev got there first, rebase, rerun the
-# tests and run it again.
+#   - the change on the branch (swarm-review..HEAD) is the change at the last approved commit the dev
+#     logged: the same diff against its own base (git patch-id). A commit added after approval, or a
+#     rebase that had to change the code, goes back to the reviewer first;
+#   - the last run of the swarm's test command (test_cmd in swarm.json; any command when it is not set)
+#     that tlock logged for exactly this HEAD, by devN or devN-reviewer with no uncommitted changes,
+#     exited 0.
+# Then it fast-forwards the integration tree to that HEAD and logs `ev devN merged <id> "<sha>"`. If
+# another dev got there first, rebase, rerun the tests and run it again. It guards against mistakes, not
+# against a dev that logs a false approval.
 set -euo pipefail
 S=$(dirname "$(realpath "$0")")
-[ $# -eq 2 ] || { echo "usage: ffmerge devN APPROVED_COMMIT" >&2; exit 2; }
-dev=$1 approved=$2
-case "$dev" in dev[0-9]*) ;; *) echo "ffmerge: the first argument is the dev's name, e.g. dev3" >&2; exit 2 ;; esac
-wt="$S/$dev" repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repo"])' "$S/swarm.json")
-g() { git -C "$wt" "$@"; }
+[ $# -eq 1 ] || { echo "usage: ffmerge devN" >&2; exit 2; }
+dev=$1
+case "$dev" in dev[0-9]*) ;; *) echo "ffmerge: the argument is the dev's name, e.g. dev3" >&2; exit 2 ;; esac
+wt="$S/$dev"
 no() { echo "ffmerge: NOT merged: $*" >&2; exit 1; }
+g() { git -C "$wt" "$@"; }
 [ -d "$wt" ] || no "no worktree $wt"
 [ "$(g branch --show-current)" = "swarm-$dev" ] || no "$wt is not on branch swarm-$dev"
 [ -z "$(g status --porcelain)" ] || no "uncommitted changes in $wt; commit them and get them approved"
 head=$(g rev-parse HEAD)
-approved=$(g rev-parse --verify -q "$approved^{commit}") || no "unknown commit $2"
-g merge-base --is-ancestor swarm-review HEAD || no "swarm-review moved; run git rebase swarm-review, rerun the tests, then ffmerge again"
-[ "$head" != "$(g rev-parse swarm-review)" ] || no "nothing to merge: the branch is at swarm-review"
-pid() { git -C "$wt" diff "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
-[ "$(pid "$(g merge-base "$approved" swarm-review)" "$approved")" = "$(pid swarm-review HEAD)" ] \
-	|| no "swarm-review..HEAD is not the change approved at ${approved:0:9} (a commit after approval, or a rebase that changed the code); resubmit to the same commit-reviewer"
-last=$(python3 - "$S/events.jsonl" "$dev" "$head" <<'PY'
-import json, re, sys
-p, dev, head = sys.argv[1:]
-last = ""
-for l in open(p):
+# From the log: the repo, the test command, the last approval the dev logged, and the last run of the
+# test command on this HEAD (tab-separated: repo, test_cmd, finding id, approved sha, run's end message).
+IFS=$'\t' read -r repo tcmd fid approved last < <(python3 - "$S" "$dev" "$head" <<'PY'
+import json, os, re, sys
+s, dev, head = sys.argv[1:]
+cfg = json.load(open(os.path.join(s, "swarm.json")))
+tcmd = cfg.get("test_cmd") or ""
+fid = sha = last = ""
+cmds = {}  # (agent, slot) -> command of the run that started there
+for l in open(os.path.join(s, "events.jsonl")):
     try:
         e = json.loads(l)
     except ValueError:
         continue
-    if e.get("kind") == "test" and e.get("agent") in (dev, dev + "-reviewer") and e["msg"].startswith("end ") \
-            and re.search(r"\bhead=" + head + r"(\s|$)", e["msg"]):
-        last = e["msg"]
-print(last)
+    a, k, m = e.get("agent"), e.get("kind"), e.get("msg", "")
+    if a == dev and k == "approved" and m.split():
+        fid, sha = e.get("id") or "-", m.split()[0]
+    if k == "test" and a in (dev, dev + "-reviewer"):
+        slot = (re.search(r"\bslot=(\d+)", m) or [None, ""])[1]
+        if m.startswith("start "):
+            cmds[a, slot] = m.split(" ", 2)[2] if m.count(" ") >= 2 else ""
+        elif m.startswith("end ") and re.search(r"\bhead=" + head + r"(\s|$)", m) \
+                and (not tcmd or cmds.get((a, slot)) == tcmd):
+            last = m
+print("\t".join([cfg["repo"], tcmd or "-", fid or "-", sha or "-", last or "-"]))
 PY
 )
-[ -n "$last" ] || no "no test run logged for HEAD ${head:0:9}; run the full tests through tlock in $wt first"
-case "$last" in *" rc=0 "*) ;; *) no "the last test run on HEAD ${head:0:9} failed ($last)" ;; esac
-git -C "$repo" merge -q --ff-only "swarm-$dev" || no "the fast-forward failed (another dev merged first?); rebase, rerun the tests, run ffmerge again"
+[ -n "$repo" ] || no "could not read swarm.json and events.jsonl in $S"
+[ "$approved" != - ] || no "no approval logged; when your commit-reviewer says APPROVED, run: \$SW/ev $dev approved <id> \"<the approved commit>\""
+approved=$(g rev-parse --verify -q "$approved^{commit}") || no "the logged approved commit $approved does not exist"
+g merge-base --is-ancestor swarm-review HEAD || no "swarm-review moved; run git rebase swarm-review, rerun the tests, then ffmerge again"
+[ "$head" != "$(g rev-parse swarm-review)" ] || no "nothing to merge: the branch is at swarm-review"
+pid() { git -C "$wt" diff "$1" "$2" | git patch-id --stable | cut -d' ' -f1; }
+[ "$(pid "$(g merge-base "$approved" swarm-review)" "$approved")" = "$(pid swarm-review HEAD)" ] \
+	|| no "swarm-review..HEAD is not the change approved at ${approved:0:9} (a commit after approval, or a rebase that changed the code); resubmit to the same commit-reviewer, then log the new approval"
+what=$([ "$tcmd" = - ] && echo "test run" || echo "run of \"$tcmd\"")
+[ "$last" != - ] || no "no $what logged for HEAD ${head:0:9}; run it through tlock in $wt first"
+case "$last" in *" rc=0 "*) ;; *) no "the last $what on HEAD ${head:0:9} failed ($last)" ;; esac
+git -C "$repo" merge -q --ff-only "$head" || no "the fast-forward failed (another dev merged first?); rebase, rerun the tests, run ffmerge again"
+"$S/ev" "$dev" merged "$([ "$fid" = - ] && echo - || echo "$fid")" "$head" || true
 echo "ffmerge: swarm-review fast-forwarded to ${head:0:9} ($dev)"

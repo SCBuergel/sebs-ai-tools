@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
-#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--title TEXT]
+#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass]
+#              [--test-cmd CMD] [--title TEXT]
 #
+# --test-cmd records the repository's full test command in swarm.json (test_cmd): ffmerge then merges a
+# dev's branch only after a passing run of exactly that command through tlock on its HEAD.
 # By default each area's reviewer is rerun fresh until 2 passes in a row find nothing (SKILL.md,
 # "Repeated passes"); --until-clean K sets that number, --one-pass (the same as --until-clean 0) runs
 # every reviewer once. swarm.json records it as until_clean; a rerun without either option keeps it.
@@ -17,7 +20,7 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= tcmd= title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -27,12 +30,13 @@ while [ $# -gt 0 ]; do
 		--slots) slots=$2; shift 2 ;;
 		--until-clean) until=$2; shift 2 ;;
 		--one-pass) until=0; shift ;;
+		--test-cmd) tcmd=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--test-cmd CMD] [--title TEXT]" >&2; exit 2;
 }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
 repo=$(realpath "$repo")
@@ -58,17 +62,19 @@ chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/ffmerge" "$swarm/devqueue" "$swarm/l
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
-# swarm.json is written once; a rerun only records a --until-clean or --one-pass given now
-python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" <<'EOF'
+# swarm.json is written once; a rerun only records a --until-clean, --one-pass or --test-cmd given now
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" <<'EOF'
 import json, os, sys
-s, title, nrev, ndev, slots, repo, source, until = sys.argv[1:]
+s, title, nrev, ndev, slots, repo, source, until, tcmd = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
        "repo": repo, "source_branch": source, "until_clean": 2} if new else json.load(open(p))
 if until:
     cfg["until_clean"] = int(until)
-if until or new:
+if tcmd:
+    cfg["test_cmd"] = tcmd
+if until or tcmd or new:
     json.dump(cfg, open(p, "w"), indent=1)
 EOF
 until=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("until_clean", 0))' "$swarm/swarm.json")
