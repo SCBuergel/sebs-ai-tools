@@ -83,6 +83,7 @@ them again. Leave the heading with "none recorded" if there are none. -->
   change), runs the command under a memory cap, and records the holder and the command in
   slots/1.json, slots/2.json and so on. One command per run; a run may wait for another
   agent's. Never start a test run any other way.
+- Full test command (test_cmd in swarm.json): {{TEST_CMD}}
 - A commit-reviewer reruns the test suite itself, but repeats a slow extra check (for example a
   mutation run) only for a check changed in the range; the dev's report lists the others.
 - Never run commands that change the machine or anything outside the worktrees: no provisioning,

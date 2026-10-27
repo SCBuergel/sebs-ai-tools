@@ -81,6 +81,17 @@ until=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("un
 [ -e "$swarm/PROTOCOL.md" ] || sed -e "s|{{SW}}|$swarm|g" -e "s|{{REPO}}|$repo|g" -e "s|{{N_REV}}|$nrev|g" \
 	-e "s|{{N_DEV}}|$ndev|g" -e "s|{{SLOTS}}|$slots|g" -e "s|{{SOURCE}}|$source|g" \
 	"$here/../PROTOCOL.md" > "$swarm/PROTOCOL.md"
+# the test command may hold any character, so it goes in without sed; a rerun with --test-cmd updates it
+python3 - "$swarm" <<'EOF'
+import json, re, sys
+s = sys.argv[1]
+t = json.load(open(f"{s}/swarm.json")).get("test_cmd")
+line = (f"`{t}`. ffmerge merges only after a passing run of exactly this command on the HEAD it merges"
+        if t else "not recorded; use the repository guide's full test command")
+p = open(f"{s}/PROTOCOL.md").read()
+p = re.sub(r"(Full test command \(test_cmd in swarm\.json\): ).*", lambda m: m.group(1) + line + ".", p.replace("{{TEST_CMD}}", line + "."))
+open(f"{s}/PROTOCOL.md", "w").write(p)
+EOF
 
 if git -C "$repo" show-ref --verify --quiet refs/heads/swarm-review; then
 	echo "branch swarm-review exists; keeping it"

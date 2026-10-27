@@ -21,6 +21,7 @@ case "$dev" in dev[0-9]*) ;; *) echo "ffmerge: the argument is the dev's name, e
 wt="$S/$dev"
 no() { echo "ffmerge: NOT merged: $*" >&2; exit 1; }
 g() { git -C "$wt" "$@"; }
+[ -s "$S/swarm.json" ] && [ -e "$S/events.jsonl" ] || no "no swarm.json or events.jsonl in $S"
 [ -d "$wt" ] || no "no worktree $wt"
 [ "$(g branch --show-current)" = "swarm-$dev" ] || no "$wt is not on branch swarm-$dev"
 [ -z "$(g status --porcelain)" ] || no "uncommitted changes in $wt; commit them and get them approved"
@@ -28,10 +29,14 @@ head=$(g rev-parse HEAD)
 # From the log: the repo, the test command, the last approval the dev logged, and the last run of the
 # test command on this HEAD (tab-separated: repo, test_cmd, finding id, approved sha, run's end message).
 IFS=$'\t' read -r repo tcmd fid approved last < <(python3 - "$S" "$dev" "$head" <<'PY'
-import json, os, re, sys
+import json, os, re, shlex, sys
 s, dev, head = sys.argv[1:]
 cfg = json.load(open(os.path.join(s, "swarm.json")))
 tcmd = cfg.get("test_cmd") or ""
+# tlock logs the command's words joined by spaces, without the shell's quotes, and ev cuts a message at 300
+# characters: compare test_cmd in the same form, and a cut command by its start.
+words = " ".join(shlex.split(tcmd)) if tcmd else ""
+same = lambda c: c is not None and (c == words or (len(c) >= 250 and words.startswith(c)))
 fid = sha = last = ""
 cmds = {}  # (agent, slot) -> command of the run that started there
 for l in open(os.path.join(s, "events.jsonl")):
@@ -47,7 +52,7 @@ for l in open(os.path.join(s, "events.jsonl")):
         if m.startswith("start "):
             cmds[a, slot] = m.split(" ", 2)[2] if m.count(" ") >= 2 else ""
         elif m.startswith("end ") and re.search(r"\bhead=" + head + r"(\s|$)", m) \
-                and (not tcmd or cmds.get((a, slot)) == tcmd):
+                and (not tcmd or same(cmds.get((a, slot)))):
             last = m
 print("\t".join([cfg["repo"], tcmd or "-", fid or "-", sha or "-", last or "-"]))
 PY

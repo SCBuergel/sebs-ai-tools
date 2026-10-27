@@ -4,6 +4,7 @@ Your tree: $SW/dev{{N}}, a git worktree on branch swarm-dev{{N}}. Edit, test and
 
 Follow the repository's guide for AI assistants (AGENTS.md, or CLAUDE.md, in your worktree) fully: fix in code rather than in docs where code can fix it, keep code and docs short, add the narrowest test that detects the change, and run every check the guide requires for a new test or a changed check. Every test run is started as
   $SW/tlock --as dev{{N}} <test command>
+(the full test command is the one PROTOCOL.md names under Resource limits, word for word: ffmerge looks for a passing run of exactly it)
 one command per run; tlock waits for one of the shared test slots, applies the memory cap and records the holder; waiting for another agent's run is expected. Never run commands that change the machine or anything outside your worktree, whatever the guide says about them.
 
 Commit messages start with "[<id>] "{{TRAILER}}
