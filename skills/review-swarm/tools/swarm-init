@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
-#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--title TEXT]
+#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K] [--title TEXT]
+#
+# --until-clean K records in swarm.json that each area's reviewer is rerun fresh until K passes in a row
+# find nothing (SKILL.md, "Repeated passes"); without it every reviewer runs once.
 #
 # Run from the repository on a clean checkout of the branch the review starts from (the source
 # branch, usually main). It creates, or completes when run again:
@@ -13,7 +16,7 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until=0 title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -21,12 +24,13 @@ while [ $# -gt 0 ]; do
 		--reviewers) nrev=$2; shift 2 ;;
 		--devs) ndev=$2; shift 2 ;;
 		--slots) slots=$2; shift 2 ;;
+		--until-clean) until=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K] [--title TEXT]" >&2; exit 2;
 }
 repo=$(realpath "$repo")
 git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
@@ -51,11 +55,15 @@ chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/devqueue" "$swarm/lastmsg"
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
-[ -e "$swarm/swarm.json" ] || python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" <<'EOF'
+case "$until" in ''|*[!0-9]*) echo "--until-clean takes a number" >&2; exit 2 ;; esac
+[ -e "$swarm/swarm.json" ] || python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" <<'EOF'
 import json, sys
-s, title, nrev, ndev, slots, repo, source = sys.argv[1:]
-json.dump({"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
-           "repo": repo, "source_branch": source}, open(f"{s}/swarm.json", "w"), indent=1)
+s, title, nrev, ndev, slots, repo, source, until = sys.argv[1:]
+cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
+       "repo": repo, "source_branch": source}
+if int(until):
+    cfg["until_clean"] = int(until)
+json.dump(cfg, open(f"{s}/swarm.json", "w"), indent=1)
 EOF
 [ -e "$swarm/PROTOCOL.md" ] || sed -e "s|{{SW}}|$swarm|g" -e "s|{{REPO}}|$repo|g" -e "s|{{N_REV}}|$nrev|g" \
 	-e "s|{{N_DEV}}|$ndev|g" -e "s|{{SLOTS}}|$slots|g" -e "s|{{SOURCE}}|$source|g" \
@@ -79,7 +87,7 @@ done
 cat <<EOF
 swarm folder: $swarm
 repository:   $repo on swarm-review (from $source at $(git -C "$repo" rev-parse --short HEAD))
-reviewers:    $nrev   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
+reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean passes in a row)")   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
 next:         fill in the task sections of $swarm/PROTOCOL.md, then start the agents
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
 EOF

@@ -77,6 +77,9 @@ repository:
     --reviewers N --devs M --slots S --title "<repo> review swarm"
 ```
 
+Add `--until-clean K` when the user wants each area reviewed again and again
+until K passes in a row find nothing (see "Repeated passes" below).
+
 It copies the tools, writes `swarm.json`, `PROTOCOL.md` and `severity.md`,
 creates branch `swarm-review` at HEAD and checks it out in the repository (the
 integration tree), the detached worktree `$SW/base` that reviewers read, and
@@ -91,8 +94,9 @@ project's trust boundaries if the default scale does not fit.
 
 ## 4. Start the agents
 
-Before the first agent, start the web dashboard and post its link, so the
-user can watch the swarm from its first event:
+Before the first agent, log the stage, `$SW/ev dispatcher stage - "setup <what
+is being set up>"`, then start the web dashboard and post its link, so the user
+can watch the swarm from its first event:
 
 1. If `curl -s http://127.0.0.1:8765/swarm.json` returns this swarm's
    `swarm.json` (a rerun, or a server the user started), keep that server.
@@ -109,7 +113,10 @@ command to start it themselves, and go on: the swarm does not need it.
 
 Fill each brief from `roles/` by replacing its `{{...}}` placeholders
 (`{{SW}}`, `{{REPO}}`, `{{SOURCE}}`, `{{N}}`, `{{N_DEV}}`, `{{AREA}}`,
-`{{FIRST_ID}}`, `{{TRAILER}}`: the commit trailer lines this session is told
+`{{FIRST_ID}}`, `{{TREE}}`: the tree the reviewer reads, `$SW/base` unless a
+later pass gives it its own, `{{FIRST_N}}`: the number of its first finding,
+1 unless an earlier reviewer of the area already reported some,
+`{{TRAILER}}`: the commit trailer lines this session is told
 to add, as " and end with these lines:" plus the lines, or nothing) and start
 each agent with the Agent tool, `subagent_type` general-purpose, in the
 background. Before the first reviewer, write each reviewer's area sentence,
@@ -125,13 +132,21 @@ agent; a dev's commit-reviewer inherits the dev's.
 
 ## 5. Dispatch
 
-Run this loop until every finding is agreed, rejected or unresolved. Record
-each transition with `$SW/ev dispatcher <kind> <id> "<msg>"`, kinds
-`validating`, `valid <severity>` (written by `devqueue`), `invalid`,
-`duplicate`, `dev` (handed to a dev), `coord` (fix being checked by the
-coordinator), `rev` (by the reporting reviewer), `agreed`, `unresolved`, and
-`note` for free-text narration the user reads on the dashboards. Never judge
-a finding yourself: forward, record, and resume.
+When the first reviewer starts, log `$SW/ev dispatcher stage - "reviewing <N>
+areas"`. Run this loop until every finding is agreed, rejected or
+unresolved. Record each transition with `$SW/ev dispatcher <kind> <id>
+"<msg>"`, kinds `validating`, `valid <severity>` (written by `devqueue`),
+`invalid`, `duplicate`, `dev` (handed to a dev), `coord` (fix being checked
+by the coordinator), `rev` (by the reporting reviewer), `agreed`,
+`unresolved`, and, with id `-`, `note` for free-text narration the user reads
+on the dashboards, `stage` for the stage of the whole swarm and `pass` for
+repeated passes. Never judge a finding yourself: forward, record, and resume.
+
+The dashboards show the latest `stage` as a banner with how long it has
+lasted, and the last three notes under it. Log one at every change, with
+the stage first and a one-line detail after it: `setup`, `reviewing`,
+`final-review` (for example `"final-review main..9e83e9b (55 commits),
+waiting on the final reviewer"`), `final-fix`, `merge`, `done`.
 
 1. A reviewer reports `R3-2`: send the coordinator `VALIDATE R3-2`, log
    `validating`.
@@ -164,29 +179,58 @@ A dev must not fast-forward `swarm-review` before its post-rebase test run
 has passed; remind it if the log shows `merge` before the tests ended. If a
 dev's message is lost, `$SW/lastmsg <agent id>` prints its last reply.
 
+### Repeated passes
+
+With `--until-clean K` (`until_clean` in `swarm.json`), an area is not
+finished when its reviewer is: once that reviewer is done and every finding
+it reported is agreed, rejected or unresolved, a fresh reviewer reviews the
+area again on the fixed tree, until K passes in a row have no finding the
+coordinator accepted. Track it with `pass` events (id `-`; the message starts
+with the reviewer), which the dashboards turn into a pass column per area:
+
+- `$SW/ev dispatcher pass - "R3 1 started"` when the first reviewer of the
+  area starts.
+- When pass p of R3 is closed: `"R3 <p> clean"` if none of its findings was
+  validated, otherwise `"R3 <p> not clean"`. With K clean passes in a row,
+  log `"R3 <p> finished"` and stop; otherwise start the next pass.
+- Next pass: `git -C <repo> worktree add --detach $SW/base-R3-p<p+1>
+  swarm-review`, fill the reviewer brief with that tree as `{{TREE}}` and the
+  next free number as `{{FIRST_N}}`, add the titles of the area's earlier
+  findings so it does not report them again, start it as a new agent named
+  R3, record it in `ids.txt` as `R3-p<p+1> <id>`, and log
+  `"R3 <p+1> started"`. A VERIFY goes to the reviewer of the pass that
+  reported the finding while it exists.
+- If the user stops an area early: `"R3 <p> stopped"`.
+
 ## 6. Finish
 
 1. In the repository, still on `swarm-review`, run the review-loop skill on
    the range `<source branch>..HEAD` with one line saying this is the
    combined range of the swarm's fixes, each already reviewed on its own,
-   that tests run only through `$SW/tlock`, and that the push happens in the
-   next step rather than in the loop. Fix its findings through a dev, not by
-   hand, each as a new finding `F-1`, `F-2`, ... (never under the id of a
-   finding it touches: `agreed`, `unresolved`, `invalid` and `duplicate` are
-   final, and an event after them reopens the finding on the dashboards).
-   For each: write `$SW/queue/F-<n>.json` with the keys a reviewer uses
-   (reviewer `"final"`) and `$SW/val/F-<n>.txt` with the first line
+   and that the push happens in the next step rather than in the loop, and
+   the line "Run tests only through `$SW/tlock --as final-reviewer` (one
+   command per run)". Log `stage - "final-review <range> (<n> commits)"` and,
+   for the dashboards' agent list, `$SW/ev final-reviewer status - "reviewing
+   <range>"`; when it answers, `$SW/ev final-reviewer done - "<verdict>"`.
+   Fix its findings through a dev, not by hand (`stage - "final-fix ..."`),
+   each as a new finding `F-1`, `F-2`, ... (never under the id of a finding
+   it touches: `agreed`, `unresolved`, `invalid` and `duplicate` are final,
+   and an event after them reopens the finding on the dashboards). For each:
+   write `$SW/queue/F-<n>.json` with the keys a reviewer uses (reviewer
+   `"final-reviewer"`) and `$SW/val/F-<n>.txt` with the first line
    `VALID F-<n> <severity>` followed by the review's text as the fix
-   requirements, run `$SW/ev final reported F-<n> "<title>"` and
+   requirements, run `$SW/ev final-reviewer reported F-<n> "<title>"` and
    `$SW/devqueue`, then hand it to a dev as in section 5 (`dev`). The
    coordinator and reviewer steps are skipped: when the dev reports `DONE`,
    resume the same final reviewer on the new range, and on APPROVED log
    `agreed F-<n> "final review APPROVED"` for every open `F-<n>`.
-2. On APPROVED, follow the repository's push rules: switch the repository
-   back to the source branch, `git merge --ff-only swarm-review`, and push if
-   the user's rules allow it, otherwise ask.
-3. Log a final `note`, then run `swarm-clean --swarm $SW --repo .` to
-   remove the worktrees and dev branches. The log, findings and verdicts stay
+2. On APPROVED, log `stage - "merge ..."` and follow the repository's push
+   rules: switch the repository back to the source branch, `git merge
+   --ff-only swarm-review`, and push if the user's rules allow it, otherwise
+   ask.
+3. Log `stage - "done <what was pushed>"`, then run `swarm-clean --swarm $SW
+   --repo .` to remove the worktrees (including the per-pass ones) and dev
+   branches. The log, findings and verdicts stay
    in `$SW` for the record.
 4. Report: what was pushed, every finding with its outcome, the optional
    items reviewers left, and what the local tests could not verify.

@@ -102,8 +102,8 @@ for it: "run a review swarm for the security of this repository", or
 `/review-swarm:review-swarm`. That session becomes the dispatcher. It:
 
 1. sizes the swarm from the machine's CPUs and memory (the limit is how many
-   test runs go at once), splits the task into areas, and runs `swarm-init`, which creates a
-   swarm folder with the tools and the protocol, branch `swarm-review`, a
+   test runs go at once), splits the task into areas, and runs `swarm-init`,
+   which creates a swarm folder with the tools and the protocol, branch `swarm-review`, a
    read-only worktree of the starting point, and one worktree per dev;
 2. starts the web dashboard and posts its link, then the reviewers
    (read-only, one area each) and the coordinator
@@ -112,14 +112,19 @@ for it: "run a review swarm for the security of this repository", or
 3. passes messages between them and records every state change in the swarm
    folder's log, without judging a finding itself. Each dev fixes one finding
    at a time in its worktree, runs `review-loop` on it, and on `APPROVED`
-   fast-forwards `swarm-review`; nobody pushes;
+   fast-forwards `swarm-review`; nobody pushes. If you ask for repeated
+   passes, each area gets a fresh reviewer again until a set number of
+   passes in a row find nothing;
 4. when every finding is agreed, has the whole range reviewed once more by one
    `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
    your rules allow, and cleans the worktrees up.
 
-You watch it live. In a terminal, `python3 $SW/dash.py` shows the agents,
+You watch it live. In a terminal, `python3 $SW/dash.py` shows the swarm's
+current stage (reviewing, final review, merge, ...) with the dispatcher's
+latest notes, the agents with each area's open and agreed findings,
 the findings pipeline (reported, validated, dev, coordinator, agreed), each
-dev's review-loop step, machine memory and load, and the event feed; `python3
+dev's review-loop step, machine memory and load with who holds each test
+slot, and the event feed; `python3
 $SW/dashweb.py` serves the same as a web page on http://127.0.0.1:8765/ with
 expandable findings and tooltips; the dispatcher starts it and posts the link
 before the first agent starts. `$SW` is the swarm folder the session names.

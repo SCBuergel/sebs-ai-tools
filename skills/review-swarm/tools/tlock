@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# tlock COMMAND...: run a test command in one of the swarm's test slots.
+# tlock [--as NAME] COMMAND...: run a test command in one of the swarm's test slots.
 #
 # Waits for a free slot (the number is in slots/count, or SWARM_TEST_SLOTS), runs the command under a
 # memory cap (SWARM_TEST_MEM, default 2G, through systemd-run; without systemd-run the command runs
-# uncapped and a warning says so) and records the holder in slots/1.json, slots/2.json, ... for the dashboards.
+# uncapped and a warning says so) and records the holder in slots/1.json, slots/2.json, ... for the
+# dashboards. NAME (or $SWARM_AGENT) says who runs it, e.g. dev2, dev2-reviewer or final-reviewer.
 # Every agent starts every test run through this, so at most that many runs share the machine.
 set -u
 S=$(dirname "$(realpath "$0")")
 MEM=${SWARM_TEST_MEM:-2G}
+AS=${SWARM_AGENT:-}
+if [ "${1:-}" = --as ]; then AS=${2:-}; shift 2 || shift; fi
 run() {
 	if command -v systemd-run >/dev/null; then
 		systemd-run --user --scope -q -p MemoryMax="$MEM" "$@"
@@ -23,8 +26,8 @@ while :; do
 		exec {fd}>"$f"
 		if flock -n "$fd"; then
 			python3 -c 'import json, sys; print(json.dumps({"slot": int(sys.argv[1]), "pid": int(sys.argv[2]), '\
-'"start": int(sys.argv[3]), "cwd": sys.argv[4], "cmd": " ".join(sys.argv[5:])}))' \
-				"$i" $$ "$(date +%s)" "$PWD" "$@" > "$S/slots/$i.json"
+'"start": int(sys.argv[3]), "cwd": sys.argv[4], "agent": sys.argv[5], "cmd": " ".join(sys.argv[6:])}))' \
+				"$i" $$ "$(date +%s)" "$PWD" "$AS" "$@" > "$S/slots/$i.json"
 			run "$@"; rc=$?
 			rm -f "$S/slots/$i.json"; exit "$rc"
 		fi

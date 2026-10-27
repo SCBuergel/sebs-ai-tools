@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # swarm-clean --swarm DIR [--repo DIR]: remove the swarm's worktrees and dev branches.
 #
-# Run after the swarm's work is merged. It removes SWARM/base and SWARM/dev* (refusing a worktree
+# Run after the swarm's work is merged. It removes SWARM/base, the per-pass trees SWARM/base-*, and SWARM/dev* (refusing a worktree
 # with uncommitted changes) and deletes each swarm-devN branch that is fully merged into
 # swarm-review. The swarm folder's log, findings and verdicts, and branch swarm-review, stay: delete
 # them yourself once they are no longer needed.
@@ -15,7 +15,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 [ -n "$swarm" ] || { echo "usage: swarm-clean --swarm DIR [--repo DIR]" >&2; exit 2; }
-for t in "$swarm"/base "$swarm"/dev*; do
+for t in "$swarm"/base "$swarm"/base-* "$swarm"/dev*; do
 	[ -d "$t" ] || continue
 	if [ -n "$(git -C "$t" status --porcelain)" ]; then
 		echo "$t has uncommitted changes; not removed" >&2; continue

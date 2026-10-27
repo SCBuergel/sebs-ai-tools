@@ -126,7 +126,8 @@ def slots():
         if isinstance(j, dict) and str(j.get("pid", "")).isdigit() and os.path.exists(f"/proc/{j['pid']}"):
             cwd = str(j.get("cwd", ""))
             rel = os.path.relpath(cwd, D) if cwd.startswith(D + "/") else ""
-            j["who"] = rel.split("/")[0] if rel else os.path.basename(cwd.rstrip("/")) or "?"
+            # tlock --as NAME records the holder; older slot files only have the directory it ran in
+            j["who"] = str(j.get("agent") or "") or (rel.split("/")[0] if rel else os.path.basename(cwd.rstrip("/")) or "?")
             held.append(j)
     return count, held
 
@@ -142,7 +143,7 @@ def machine():
     return {"mem_total": m.get("MemTotal", 0), "mem_avail": m.get("MemAvailable", 0),
             "swap_total": m.get("SwapTotal", 0), "swap_used": m.get("SwapTotal", 0) - m.get("SwapFree", 0),
             "load": load, "cpus": os.cpu_count() or 1, "slot_count": count,
-            "slots": [{k: j.get(k) for k in ("slot", "pid", "start", "cwd", "cmd", "who")} for j in held]}
+            "slots": [{k: j.get(k) for k in ("slot", "pid", "start", "cwd", "cmd", "who", "agent")} for j in held]}
 
 
 def mem_col(avail):
@@ -202,8 +203,33 @@ def box(title, lines, w, col):
     return out
 
 
+# Stages of the whole swarm, logged by the dispatcher with `ev dispatcher stage - "<stage> <detail>"`.
+STAGE_COL = {"setup": 245, "reviewing": 81, "final-review": 177, "final-fix": 220, "merge": 214, "done": 46}
+OPEN = ("reported", "validating", "valid", "dev", "coord", "rev")  # finding states that still need work
+
+
+def pass_event(e, passes):
+    """Apply `ev dispatcher pass - "R9 23 started|clean|not clean|finished|stopped"` to passes[R9]."""
+    w = e["msg"].split()
+    if len(w) < 3 or not w[1].isdigit():
+        return None
+    r, n, what = w[0], int(w[1]), " ".join(w[2:])
+    p = passes.setdefault(r, {"pass": n, "clean": 0, "state": "running", "t": e["t"]})
+    p["t"] = e["t"]
+    if what == "started":
+        p.update({"pass": n, "state": "running"})
+    elif what == "clean":
+        p["clean"] += 1
+    elif what == "not clean":
+        p["clean"] = 0
+    elif what in ("finished", "stopped"):
+        p["state"] = what
+    return r if what == "started" else None
+
+
 def state_of(evs):
     agents, focus, findings, order, notes = {}, {}, {}, [], []
+    stage, passes = None, {}
     for e in evs:
         a, k, i = e["agent"], e["kind"], e["id"]
         if k == "focus":
@@ -211,6 +237,14 @@ def state_of(evs):
             continue
         if k == "note":
             notes.append(e)
+            continue
+        if k == "stage":
+            stage = e
+            continue
+        if k == "pass":
+            r = pass_event(e, passes)
+            if r in agents:
+                agents[r]["done"] = False  # a fresh reviewer took the area over
             continue
         st = agents.setdefault(a, {"msg": "", "t": e["t"], "done": False, "n": 0, "busy": False, "fid": ""})
         if k in ("status", "reported", "done", "idle"):
@@ -220,7 +254,7 @@ def state_of(evs):
         if a.startswith("R"):
             st["done"] = st["done"] or k == "done"
         else:
-            st["busy"] = k != "idle"
+            st["busy"] = k not in ("idle", "done")
         if k == "reported":
             st["n"] += 1
         if i:
@@ -247,7 +281,27 @@ def state_of(evs):
                 f["last"] = (a, e["msg"], e["t"])
                 if a in DEVS:
                     f["dev"] = a
-    return agents, focus, findings, order, notes
+    return agents, focus, findings, order, notes, stage, passes
+
+
+def area(r, agents, findings, passes):
+    """A reviewer's area: (label, colour, finished, open findings, agreed findings)."""
+    mine = [f for f in findings.values() if f["by"] == r]
+    opn = sum(f["state"] in OPEN for f in mine)
+    agreed = sum(f["state"] == "agreed" for f in mine)
+    st, p = agents.get(r), passes.get(r)
+    verifying = next((i for i, f in findings.items() if f["by"] == r and f["state"] == "rev"), None)
+    if p and p["state"] in ("finished", "stopped"):
+        return f"area {p['state']} after pass {p['pass']}", 46, True, opn, agreed
+    if verifying:
+        return f"verifying the fix of {verifying}", 117, False, opn, agreed
+    if not st:
+        return "not started", 240, False, opn, agreed
+    if st["done"] and opn:
+        return f"kept for VERIFY, {opn} open", 117, False, opn, agreed
+    if st["done"]:
+        return ("pass done, waiting for the next" if p else "done"), 46, not p, opn, agreed
+    return "", 220, False, opn, agreed
 
 
 def track(f, tick):
@@ -313,7 +367,8 @@ def render(evs, tick):
     now = time.time()
     W = shutil.get_terminal_size((130, 50)).columns
     H = shutil.get_terminal_size((130, 50)).lines
-    agents, focus, findings, order, notes = state_of(evs)
+    agents, focus, findings, order, notes, stage, passes = state_of(evs)
+    until = int(CFG.get("until_clean") or 0)
     t0 = evs[0]["t"] if evs else now
     out = []
 
@@ -327,7 +382,7 @@ def render(evs, tick):
     done = sum(f["state"] == "agreed" for f in findings.values())
     rej = sum(f["state"] in ("invalid", "duplicate") for f in findings.values())
     unres = sum(f["state"] == "unresolved" for f in findings.values())
-    revdone = sum(1 for r in REVIEWERS if agents.get(r, {}).get("done"))
+    revdone = sum(1 for r in REVIEWERS if area(r, agents, findings, passes)[2])
     head = (f" Reviews {B}{revdone}/{len(REVIEWERS)}{R} done   Findings {B}{len(findings)}{R} "
             f"({fg(46)}{done} agreed{R}, {fg(177)}{len(valid) - done - unres} in pipeline{R}, "
             f"{fg(240)}{rej} rejected{R}, {fg(196)}{unres} unresolved{R})")
@@ -348,11 +403,17 @@ def render(evs, tick):
     out.append(" Severity " + (chips or DIM + "none confirmed yet" + R))
     out.append(machine_line(machine(), now))
 
-    # Narration
+    # Stage and narration
     if NOTE:
         out.append(" " + fg(196) + "⚠ " + R + cut(NOTE, W - 4))
-    if notes:
-        n = notes[-1]
+    if stage:
+        name, _, detail = stage["msg"].partition(" ")
+        col = STAGE_COL.get(name, 245)
+        out.append(" " + bgc(col) + fg(16) + B + f" {name.upper()} " + R + f" {B}{ago(stage['t'], now)}{R}  "
+                   + cut(detail, W - len(name) - 16))
+    else:
+        out.append(" " + DIM + "stage not logged yet (ev dispatcher stage - \"<stage> <detail>\")" + R)
+    for n in notes[-3:]:
         out.append(" " + fg(177) + "▶ " + R + IT + cut(n["msg"], W - 14) + R + DIM + f"  {ago(n['t'], now)} ago" + R)
     out.append("")
 
@@ -368,12 +429,21 @@ def render(evs, tick):
             icon, msg = fg(46) + "✔" + R, DIM + cut(st["msg"], leftw - 32) + R
         else:
             icon, msg = fg(220) + SPIN[(tick + idx) % len(SPIN)] + R, cut(st["msg"], leftw - 32)
-        n = st["n"] if st else 0
-        flag = (fg(214) + f"⚑{n}" + R) if n else DIM + "⚑0" + R
-        left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {msg}")
+        label, lcol, fin, opn, agreed = area(r, agents, findings, passes)
+        if fin:
+            icon = fg(46) + "✔" + R
+        if label:
+            msg = fg(lcol) + label + R
+        flag = fg(214 if opn else 240) + f"{opn}o" + R + DIM + "/" + R + fg(46 if agreed else 240) + f"{agreed}a" + R
+        p = passes.get(r)
+        ptxt = (fg(81) + f"p{p['pass']}" + R + DIM + f" {p['clean']}{'/' + str(until) if until else ''}✓ " + R) if p else ""
+        left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {ptxt}{msg}")
     left.append("")
-    for a in ["coordinator"] + DEVS:
-        st = agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""})
+    others = sorted({e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"})
+    for a in ["coordinator"] + DEVS + others:
+        st = dict(agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""}))
+        if a in DEVS and st["fid"] in findings and findings[st["fid"]]["state"] not in OPEN:
+            st["busy"] = False  # its finding is closed: the dev is idle even if it never said so
         icon = fg(220) + SPIN[tick % len(SPIN)] + R if st["busy"] else fg(240) + "◌" + R
         fid = (B + f"{st['fid']:<6}" + R) if st["fid"] else " " * 6
         steps = steps_of(findings[st["fid"]]) if a in DEVS and st["busy"] and st["fid"] in findings else []

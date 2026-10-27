@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Append one event to the swarm log.  ev AGENT KIND ID MESSAGE...   (ID is "-" when the event is about no finding)
 
-Every agent reports through this; both dashboards and `queue` read the log. One JSON object per line:
+Every agent reports through this; both dashboards and `devqueue` read the log. The dispatcher's `stage`,
+`pass` and `note` events use the ID "-": the ID field is for finding ids only. One JSON object per line:
 t (epoch seconds), agent, kind, id, msg (cut to 300 characters).
 """
 import fcntl, json, os, sys, time
