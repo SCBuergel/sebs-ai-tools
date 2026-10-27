@@ -51,7 +51,7 @@
       "source": "./skills/review-swarm",
       "strict": false,
       "skills": ["./"],
-      "version": "0.3.0",
+      "version": "0.3.1",
       "description": "Run a review swarm: reviewer agents audit one area each, a coordinator validates their findings, devs fix them in parallel in their own worktrees with their own commit-reviewers, watched on a terminal and a web dashboard.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"

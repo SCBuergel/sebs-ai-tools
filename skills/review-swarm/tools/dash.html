@@ -244,25 +244,55 @@ section > header h2 { white-space: nowrap; }
 .slot .cmd { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slot.free { color: var(--ink-3); }
 .a-R { color: var(--cyan); }
+/* Mode: one pass or repeated passes, from swarm.json's until_clean */
+.mode { font: 600 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 3px 10px; border-radius: 3px; border: 1px solid; white-space: nowrap; }
+.mode.rep { color: var(--cyan); border-color: var(--cyan); background: rgba(47,216,240,.1); }
+.mode.one { color: var(--warn); border-color: var(--warn); background: rgba(255,197,61,.1); }
+.stagebar .smode { font-size: 12.5px; color: var(--ink-2); }
+.stagebar .smode b { color: var(--ink); font-weight: 600; }
+/* Activity: who is busy now and a lane per agent over time */
+.now-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.now-chips .chip b { font-weight: 600; }
+.hint { color: var(--ink-3); font-size: 12.5px; margin: 8px 0 0; }
+.winsel { display: inline-flex; gap: 4px; margin-left: auto; }
+.winsel button { padding: 2px 8px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--ink-3); font: 12px var(--mono); }
+.winsel button.on { color: var(--neon); border-color: var(--neon); }
+.conc { width: 100%; height: 90px; display: block; margin-top: 10px; }
+.lanes { display: grid; gap: 3px; margin-top: 8px; }
+.lane { display: grid; grid-template-columns: 110px minmax(0, 1fr) 210px; gap: 8px; align-items: center; font: 12px var(--mono); }
+.lane .ln { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane .lnow { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ltrack { position: relative; height: 16px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.ltrack i { position: absolute; top: 0; height: 11px; min-width: 2px; border-radius: 1px; opacity: .85; }
+.ltrack i.t { top: 12px; height: 4px; background: var(--violet); opacity: 1; }
+.ltrack i.w { top: 12px; height: 4px; background: repeating-linear-gradient(90deg, var(--orange) 0 4px, transparent 4px 7px); opacity: 1; }
+.axis { display: grid; grid-template-columns: 110px minmax(0, 1fr) 210px; gap: 8px; font: 11px var(--mono); color: var(--ink-3); }
+.axis > div { position: relative; height: 14px; }
+.axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.lkey { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+.lkey i { display: inline-block; width: 14px; height: 8px; border-radius: 1px; margin-right: 5px; vertical-align: 0; }
 /* Narrow screens; last, so it overrides the rules above */
 @media (max-width: 600px) {
   section > header .badge { display: none; }
   .slot { display: flex; flex-wrap: wrap; gap: 2px 10px; }
   .slot .cmd { order: 9; flex-basis: 100%; }
   .slot .pid { display: none; }
+  .lane, .axis { grid-template-columns: 64px minmax(0, 1fr); }
+  .lane .lnow, .axis > div:last-child { display: none; }
 }
 </style>
 </head>
 <body>
 <div class="top">
   <h1 data-tip="<b>Swarm</b><br>The title from swarm.json in the swarm folder. The dot is green while the page reads the log every 5 seconds and turns orange when a read fails (the server stopped, or the folder moved)."><span class="pulse" id="pulse"></span><span class="prompt">&gt;</span><span id="title">REVIEW SWARM</span></h1>
+  <span id="mode" class="mode"></span>
   <div class="meta">
     <span data-tip="<b>Elapsed</b><br>Time since the first event in events.jsonl, i.e. since the swarm started.">⏱ <span id="elapsed">–</span></span>
     <span data-tip="<b>Events</b><br>Lines in events.jsonl, the shared log every agent appends to with the ev helper.">📜 <span id="nev">–</span> events</span>
     <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 5 seconds while the tab is visible and redraws only what changed; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
   </div>
   <nav>
-    <a href="#overview" data-tip="Jump to <b>Overview</b>: areas finished, finding counts and progress. The stage and the latest notes are in the banner above it.">overview</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
+    <a href="#overview" data-tip="Jump to <b>Overview</b>: areas finished, finding counts and progress. The stage and the latest notes are in the banner above it.">overview</a><a href="#activity" data-tip="Jump to <b>Activity</b>: who is busy now, and a timeline of every agent's work and test runs.">activity</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
     <button id="allbtn" data-tip="Show every section again after focusing on one, and expand them all.">⤡ show all</button>
   </nav>
 </div>
@@ -282,6 +312,22 @@ section > header h2 { white-space: nowrap; }
         <div class="legend"><span data-tip="<b>Agreed</b><br>Fixed, approved by the dev's commit-reviewer, confirmed by the coordinator, and merged into swarm-review."><i style="background:var(--good)"></i>agreed</span><span data-tip="<b>In pipeline</b><br>Validated but not agreed yet: queued for a dev, being fixed, or being checked."><i style="background:var(--violet);opacity:.75"></i>in pipeline</span><span data-tip="<b>Unresolved</b><br>No agreement after 4 rounds, or dev and coordinator disagree. Needs the user."><i style="background:var(--critical)"></i>unresolved</span><span data-tip="<b>Total</b><br>Agreed findings out of all validated ones. Rejected and duplicate findings do not count."><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
       </div>
       <div class="chips" id="chips"></div>
+    </div>
+  </section>
+
+  <section id="activity">
+    <header data-tip="<b>Activity</b><br>Who is working right now and who was working when, rebuilt from the log. Test slots only limit test runs; agents read, edit and review outside the slots, so most of the time few slots are busy even when many agents are. Click to collapse, ⤢ to focus on this section alone.">
+      <span class="chev">▼</span><h2>Activity</h2><span class="badge" id="actbadge" data-tip="<b>Activity summary</b><br>Agents working now, test runs in a slot, and test runs waiting for a free slot."></span><span class="help">?</span>
+      <div class="hdr-tools"><button class="focusbtn" data-tip="<b>Focus</b><br>Show this section alone and hide the others; click again, or ⤡ show all, to bring them back.">⤢</button></div>
+    </header>
+    <div class="body">
+      <div class="now-chips" id="nowchips"></div>
+      <p class="hint">A test slot is held only while a test command runs (<code>tlock</code>). Reviewers, the coordinator and the devs' commit-reviewers mostly read and think, and devs edit, outside any slot: a lane below shows an agent's work, the violet strip under it its test runs, the dashed orange strip time spent waiting for a free slot.</p>
+      <div style="display:flex;align-items:center;margin-top:10px"><span class="sub" style="margin:0" data-tip="<b>Over time</b><br>Busy agents (filled) and test runs in a slot (violet line) over the chosen window; the dashed line is the current slot count, the orange line runs waiting for a slot.">Over time <span class="help">?</span></span><span class="winsel" id="winsel"></span></div>
+      <svg class="conc" id="conc" preserveAspectRatio="none"></svg>
+      <div class="lanes" id="lanes"></div>
+      <div class="axis" id="axis"></div>
+      <div class="lkey" id="lkey"></div>
     </div>
   </section>
 
@@ -408,6 +454,7 @@ const KIND = {
   note: 'Free-text narration, usually the dispatcher explaining a decision.',
   phase: 'A review-loop step of a dev: implement, test, review-k, fix-k, approved, merge or blocked.',
   stage: 'The dispatcher moved the whole swarm to a new stage; the banner at the top shows the latest.',
+  test: 'A test run through tlock: waiting for a slot (wait), holding one (start slot=N), finished (end slot=N rc=…), or gave up waiting.',
   pass: 'Repeated passes: a fresh reviewer took an area over (started), a pass ended (clean, not clean), or the area is finished or stopped.',
 };
 // Stages of the whole swarm: `ev dispatcher stage - "<stage> <detail>"`.
@@ -453,7 +500,7 @@ async function fetchText(p) {
 // Redraw only what changed: the machine panel when sys.json changes, everything when the log, swarm.json,
 // areas.json or a finding's files change, and everything every 30 s so the "ago" times stay current.
 // Without a GPU every redraw is a software repaint, so an unchanged poll must cost next to nothing.
-let lastTxt = null, lastSys = null, lastCfg = null, lastAreas = null, lastFull = 0, polling = false;
+let pageTxt = null, lastTxt = null, lastSys = null, lastCfg = null, lastAreas = null, lastFull = 0, polling = false;
 async function poll() {
   if (polling || document.hidden) return;
   polling = true;
@@ -464,6 +511,7 @@ async function poll() {
     try { sys = await fetchText('sys.json'); } catch (e) {}
     if (sys !== lastSys) { lastSys = sys; try { mach = JSON.parse(sys); } catch (e) { mach = null; } renderMachine(Date.now()/1000); }
     if (tick % 6 === 0) {
+      try { const t = await fetchText('dash.html'); if (pageTxt === null) pageTxt = t; else if (t !== pageTxt) location.reload(); } catch (e) {}  // a dashboard update shows without a manual reload
       try { const t = await fetchText('swarm.json'); if (t !== lastCfg) { lastCfg = t; cfg = JSON.parse(t); changed = true; } } catch (e) {}
       try { const t = await fetchText('areas.json'); if (t !== lastAreas) { lastAreas = t; areas = JSON.parse(t); changed = true; } } catch (e) {}
     }
@@ -660,13 +708,172 @@ function gotoFinding(id) {
   setTimeout(render, 2600);
 }
 
+// The swarm's mode from swarm.json: until_clean > 0 reruns each area with a fresh reviewer until that many passes in a
+// row are clean; 0 or missing (swarms set up before 0.3.0) is one pass per area.
+function modeOf() {
+  const k = +cfg.until_clean || 0;
+  return k ? {cls: 'rep', short: `repeated passes · until ${k} clean`, long: `Repeated passes: once an area's findings are closed, a fresh reviewer with the same brief reviews it again; the area is finished after ${k} passes in a row with no accepted finding.`}
+    : {cls: 'one', short: 'one pass', long: 'One pass: each area is reviewed once; an area is finished when its reviewer is done and its findings are closed (swarm-init --one-pass).'};
+}
+
+// Who works when, rebuilt from the log. Each agent gets a lane of [a, b, kind] segments (b null = still going):
+// reviewers work until "done" and again from a "pass ... started" or while the dispatcher has them verify a fix;
+// the coordinator works while the dispatcher has a finding with it (validating, coord); a dev works from its own
+// events until the dispatcher moves its finding on (or it says idle), and while its phase is review-k the work is
+// its commit-reviewer's. tlock's "test" events (wait / start slot=N / end slot=N) give the test runs.
+const ACT = {
+  review:   ['var(--cyan)', 'reviewing its area'],
+  verify:   ['var(--aqua)', 'checking a fix (VERIFY)'],
+  validate: ['var(--blue)', 'validating a finding'],
+  check:    ['var(--violet)', 'checking a fix'],
+  work:     ['var(--yellow)', 'implementing / fixing'],
+  devrev:   ['var(--magenta)', 'its commit-reviewer reviews'],
+  other:    ['var(--ink-2)', 'working'],
+};
+function activity() {
+  const lanes = {}, fst = {}, coordQ = new Map(), revDone = {};
+  const lane = a => lanes[a] ||= {segs: [], cur: null, fid: '', phase: '', tests: [], waits: {}};
+  const set = (a, kind, t, why = '') => {
+    const l = lane(a);
+    if (l.cur && l.cur.kind === kind) { l.cur.why = why || l.cur.why; return; }
+    if (l.cur) l.cur.b = t;
+    l.cur = kind ? {a: t, b: null, kind, why} : null;
+    if (l.cur) l.segs.push(l.cur);
+  };
+  const isDev = a => /^dev\d+$/.test(a), isRev = a => /^R\d+$/.test(a);
+  for (const e of evs) {
+    const a = e.agent, k = e.kind, i = e.id, t = e.t, msg = e.msg || '';
+    if (k === 'test') {
+      const owner = a.replace(/^(dev\d+)-reviewer$/, '$1'), l = lane(owner), w = msg.split(/\s+/), slot = (msg.match(/slot=(\d+)/) || [])[1];
+      if (w[0] === 'wait') l.waits[a] = t;
+      else if (w[0] === 'start') {
+        if (l.waits[a] !== undefined) { l.tests.push({a: l.waits[a], b: t, who: a, wait: true}); delete l.waits[a]; }
+        l.tests.push({a: t, b: null, who: a, slot, cmd: w.slice(2).join(' ')});
+      } else if (w[0] === 'end') {
+        const r = l.tests.find(x => !x.wait && x.b === null && x.who === a && x.slot === slot);
+        if (r) Object.assign(r, {b: t, rc: (msg.match(/rc=(\S+)/) || [])[1]});
+      } else if (w[0] === 'gave' && l.waits[a] !== undefined) { l.tests.push({a: l.waits[a], b: t, who: a, wait: true}); delete l.waits[a]; }
+      continue;
+    }
+    if (k === 'pass') {
+      const [r, , ...what] = msg.split(/\s+/), wh = what.join(' ');
+      if (wh === 'started') { revDone[r] = false; set(r, 'review', t); }
+      else if (wh === 'finished' || wh === 'stopped') { revDone[r] = true; set(r, null, t); }
+      continue;
+    }
+    if (a === 'dispatcher') {
+      if (!i || !(k in STATE)) continue;
+      const prev = fst[i]; fst[i] = k;
+      coordQ.delete(i);
+      if (k === 'validating' || k === 'coord') coordQ.set(i, k);
+      const q = [...coordQ.values()];
+      set('coordinator', q.length ? (q.includes('validating') ? 'validate' : 'check') : null, t, [...coordQ.keys()].join(', '));
+      const by = i.split('-')[0];
+      if (isRev(by)) { if (k === 'rev') set(by, 'verify', t, i); else if (prev === 'rev') set(by, revDone[by] === false ? 'review' : null, t); }
+      for (const [d, l] of Object.entries(lanes)) if (isDev(d) && l.fid === i && l.cur && k !== 'dev') set(d, null, t);
+      continue;
+    }
+    if (isRev(a)) {
+      if (k === 'done') { revDone[a] = true; set(a, null, t); }
+      else if (['status', 'reported', 'focus'].includes(k) && !revDone[a]) { revDone[a] = false; set(a, 'review', t); }
+      continue;
+    }
+    if (isDev(a)) {
+      const l = lane(a);
+      if (k === 'idle' || k === 'done') { set(a, null, t); continue; }
+      if (i && i !== l.fid) { l.fid = i; l.phase = ''; }
+      if (k === 'phase') l.phase = msg;
+      if (fst[l.fid] && fst[l.fid] !== 'dev' && k !== 'phase') continue;  // a report after its finding moved on
+      set(a, phaseKind(l.phase) === 'review' ? 'devrev' : 'work', t, l.fid + (l.phase ? ' ' + l.phase : ''));
+      continue;
+    }
+    if (a === 'coordinator' || a === 'dash') continue;
+    if (k === 'status') set(a, 'other', t, msg); else if (k === 'done' || k === 'idle') set(a, null, t);
+  }
+  // A test run whose end was never logged counts as running only while its slot is still held.
+  const held = new Set((mach?.slots || []).map(j => String(j.agent || j.who) + '/' + j.slot));
+  for (const l of Object.values(lanes)) for (const r of l.tests) if (!r.wait && r.b === null && !held.has(r.who + '/' + r.slot)) r.b = r.a;
+  // A run still logged as waiting while a slot is free was stopped without logging (tlock retries every 3 s).
+  const free = mach && mach.slots.length < mach.slot_count, now = Date.now() / 1000;
+  for (const l of Object.values(lanes)) for (const [who, t0] of Object.entries(l.waits)) l.tests.push({a: t0, b: free && now - t0 > 10 ? t0 : null, who, wait: true});
+  return lanes;
+}
+
+const WINDOWS = [['30m', 1800], ['1h', 3600], ['3h', 10800], ['all', 0]];
+let winSel = store.get('actwin', 3600);
+function renderActivity(now, agentsOrder) {
+  const lanes = activity(), mc = mach, slotCount = mc ? mc.slot_count : 0;
+  const busy = Object.entries(lanes).filter(([a, l]) => l.cur);
+  const byKind = k => busy.filter(([a, l]) => l.cur.kind === k).map(([a]) => a);
+  const testing = Object.values(lanes).flatMap(l => l.tests.filter(r => !r.wait && r.b === null));
+  const waiting = Object.values(lanes).flatMap(l => l.tests.filter(r => r.wait && r.b === null));
+  const heldNow = mc ? mc.slots.length : testing.length;
+  const chip = (label, names, color, tip) => `<span class="chip" data-tip="<b>${tesc(label)}</b><br>${tesc(tip)}${names.length ? '<br>' + tesc(names.join(', ')) : ''}"><span class="dot" style="background:${color}"></span>${esc(label)} <b>${names.length}</b></span>`;
+  $('nowchips').innerHTML = `<span class="muted">Working now: <b style="color:var(--ink)">${busy.length}</b> of ${agentsOrder.length} agents ·</span>` +
+    chip('reviewing', [...byKind('review'), ...byKind('verify')], ACT.review[0], 'Reviewers reading their area, or checking the fix of their finding.') +
+    chip('coordinator', [...byKind('validate'), ...byKind('check')], ACT.validate[0], 'The coordinator has a finding to validate or a fix to check.') +
+    chip('devs editing', byKind('work'), ACT.work[0], 'Devs implementing, testing, fixing review findings or merging.') +
+    chip('commit-reviewers', byKind('devrev'), ACT.devrev[0], 'Devs whose change is with their own commit-reviewer (phase review-k); the dev waits.') +
+    `<span class="chip" data-tip="<b>Test slots</b><br>Test runs holding a slot now, of the slot count in slots/count. Only test runs take a slot."><span class="dot" style="background:var(--violet)"></span>testing <b>${heldNow}/${slotCount || '?'}</b> slots</span>` +
+    `<span class="chip" data-tip="<b>Waiting for a slot</b><br>Test runs queued in tlock because every slot is taken. If this stays above 0 while load is below the CPU count, raise slots/count.${waiting.length ? '<br>' + tesc(waiting.map(r => r.who).join(', ')) : ''}"><span class="dot" style="background:var(--orange)"></span>waiting <b>${waiting.length}</b></span>` +
+    chip('idle', agentsOrder.filter(a => !lanes[a]?.cur), 'var(--line-2)', 'Agents with nothing to do right now: reviewers whose pass is done, devs without a finding.');
+  $('actbadge').textContent = `${busy.length} working · ${heldNow}/${slotCount || '?'} slots · ${waiting.length} waiting`;
+
+  const t0 = evs.length ? evs[0].t : now, from = winSel ? Math.max(t0, now - winSel) : t0, span = Math.max(60, now - from);
+  const x = t => Math.max(0, Math.min(100, 100 * (t - from) / span));
+  $('winsel').innerHTML = WINDOWS.map(([l, s]) => `<button data-win="${s}" class="${s === winSel ? 'on' : ''}" data-tip="Show the last ${l === 'all' ? 'everything since the swarm started' : l}.">${l}</button>`).join('');
+  const segs = (list, cls, color, tipf) => list.filter(s => (s.b ?? now) >= from).map(s => {
+    const a = x(s.a), b = x(s.b ?? now);
+    return `<i class="${cls}" style="left:${a}%;width:${Math.max(0, b - a)}%${color ? ';background:' + color : ''}" data-tip="${tipf(s)}"></i>`;
+  }).join('');
+  const dur = s => ago(s.a, s.b ?? now);
+  $('lanes').innerHTML = agentsOrder.map(a => {
+    const l = lanes[a] || {segs: [], tests: [], cur: null};
+    const colored = l.segs.filter(s => (s.b ?? now) >= from).map(s => {
+      const p = x(s.a), q = x(s.b ?? now);
+      return `<i style="left:${p}%;width:${Math.max(0, q - p)}%;background:${ACT[s.kind][0]}" data-tip="<b>${tesc(a)}</b> · ${tesc(ACT[s.kind][1])}${s.why ? ' · ' + tesc(s.why) : ''}<br>${hms(s.a)} – ${s.b ? hms(s.b) : 'now'} (${dur(s)})"></i>`;
+    }).join('');
+    const tests = segs(l.tests.filter(r => !r.wait), 't', null, r => `<b>${tesc(r.who)}</b> · test run in slot ${tesc(r.slot)}${r.rc !== undefined ? ', exit ' + tesc(r.rc) : ''}<br>${tesc(r.cmd || '')}<br>${hms(r.a)} – ${r.b ? hms(r.b) : 'now'} (${dur(r)})`) +
+      segs(l.tests.filter(r => r.wait), 'w', null, r => `<b>${tesc(r.who)}</b> · waiting for a free test slot<br>${hms(r.a)} – ${r.b ? hms(r.b) : 'now'} (${dur(r)})`);
+    const nowTxt = l.cur ? ACT[l.cur.kind][1] + (l.cur.why ? ' · ' + l.cur.why : '') : 'idle';
+    return `<div class="lane"><span class="ln ${acls(a)}">${esc(a)}</span><div class="ltrack">${colored}${tests}</div><span class="lnow" style="color:${l.cur ? ACT[l.cur.kind][0] : 'var(--ink-3)'}">${esc(nowTxt)}</span></div>`;
+  }).join('');
+  const ticks = [0, .25, .5, .75, 1].map(f => `<span style="left:${f * 100}%">${f === 1 ? 'now' : '-' + ago(from + f * span, now)}</span>`).join('');
+  $('axis').innerHTML = `<div></div><div>${ticks}</div><div></div>`;
+  $('lkey').innerHTML = Object.entries(ACT).map(([k, [c, l]]) => `<span><i style="background:${c}"></i>${esc(l)}</span>`).join('') +
+    `<span><i style="background:var(--violet);height:4px"></i>test run in a slot</span><span><i style="background:repeating-linear-gradient(90deg,var(--orange) 0 4px,transparent 4px 7px);height:4px"></i>waiting for a slot</span>`;
+
+  // Concurrency over the window, sampled: busy agents, test runs in a slot, runs waiting.
+  const N = 240, all = Object.values(lanes), W = 1000, H = 90, maxY = Math.max(agentsOrder.length, slotCount, 1);
+  const cnt = (list, t) => list.reduce((n, s) => n + (s.a <= t && (s.b ?? now) > t ? 1 : 0), 0);
+  const pts = Array.from({length: N + 1}, (_, n) => {
+    const t = from + span * n / N;
+    return [n * W / N, cnt(all.flatMap(l => l.segs), t), cnt(all.flatMap(l => l.tests.filter(r => !r.wait)), t), cnt(all.flatMap(l => l.tests.filter(r => r.wait)), t)];
+  });
+  const y = v => H - 4 - (H - 8) * v / maxY;
+  const line = idx => pts.map(p => `${p[0].toFixed(1)},${y(p[idx]).toFixed(1)}`).join(' ');
+  $('conc').setAttribute('viewBox', `0 0 ${W} ${H}`);
+  $('conc').innerHTML = `<polygon points="0,${H} ${line(1)} ${W},${H}" fill="rgba(242,194,48,.18)" stroke="var(--yellow)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` +
+    `<polyline points="${line(2)}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    `<polyline points="${line(3)}" fill="none" stroke="var(--orange)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` +
+    (slotCount ? `<line x1="0" x2="${W}" y1="${y(slotCount)}" y2="${y(slotCount)}" stroke="var(--violet)" stroke-dasharray="6 5" stroke-width="1" vector-effect="non-scaling-stroke"/>` : '') +
+    '';
+  $('conc').dataset.tip = `<b>Over time</b><br>Yellow: agents working. Violet: test runs in a slot (dashed: the current slot count, ${slotCount}). Orange: runs waiting for a slot. The top of the chart is ${maxY}.`;
+}
+
 function render() {
   const now = Date.now()/1000;
   const {agents, focus, findings, order, notes, stage, passes} = stateOf();
   for (const d of DEVS) if (agents[d] && findings[agents[d].fid] && !OPEN.includes(findings[agents[d].fid].state)) agents[d].busy = false;  // its finding is closed
   const until = +cfg.until_clean || 0;
   const areasNow = Object.fromEntries(REVIEWERS.map(r => [r, areaOf(r, agents, findings, passes)]));
+  const mode = modeOf();
+  $('mode').className = 'mode ' + mode.cls; $('mode').textContent = mode.short;
+  $('mode').dataset.tip = `<b>Mode</b><br>${tesc(mode.long)}<br>From until_clean in swarm.json.`;
   stageBar(stage, notes, now);
+  const pdone = REVIEWERS.filter(r => areasNow[r].finished).length;
+  const onPass = REVIEWERS.filter(r => passes[r] && passes[r].state === 'running').map(r => `${r} p${passes[r].pass} (${passes[r].clean}/${until} clean)`);
+  $('stagebar').insertAdjacentHTML('beforeend', `<div class="smode" data-tip="<b>Mode</b><br>${tesc(mode.long)}"><span class="mode ${mode.cls}">${esc(mode.short)}</span> &nbsp;<b>${pdone}/${REVIEWERS.length}</b> areas finished${until && onPass.length ? ' · running: ' + esc(onPass.join(', ')) : ''}</div>`);
   const t0 = evs.length ? evs[0].t : now;
   $('elapsed').textContent = ago(t0, now); $('nev').textContent = evs.length;
 
@@ -697,6 +904,7 @@ function render() {
     : '<span class="muted">none confirmed yet</span>');
 
   renderMachine(now);
+  renderActivity(now, [...REVIEWERS, 'coordinator', ...DEVS, ...[...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !/^dev\d+-reviewer$/.test(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort()]);
 
   // Agents
   $('reviewers').innerHTML = (REVIEWERS.length ? '' : '<div class="empty" data-tip="<b>No reviewers</b><br>swarm.json names none and none has written to the log yet.">no reviewers yet</div>') + REVIEWERS.map(r => {
@@ -706,7 +914,7 @@ function render() {
       <span class="state ${ar.cls}"></span><span class="name a-R">${r} <span class="n">⚑${st?.n || 0}</span></span><span class="focusarea">${esc(focus[r] || '')}</span><span class="rstat">${ptxt ? esc(ptxt) + ' · ' : ''}<b style="color:${ar.open ? 'var(--warn)' : 'var(--ink-3)'}">${ar.open} open</b> · <b style="color:${ar.agreed ? 'var(--good)' : 'var(--ink-3)'}">${ar.agreed} agreed</b> · ${esc(ar.label)}</span><span class="age">${st ? ago(st.t, now) : ''}</span></div>` +
       (open ? revDetail(r, order.filter(i => findings[i].by === r), findings) : '');
   }).join('');
-  const others = [...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort();
+  const others = [...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !/^dev\d+-reviewer$/.test(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort();
   for (const a of others) if (agents[a]) agents[a].busy = agents[a].kind === 'status';  // e.g. the final reviewer: busy only while it reports work
   $('team').innerHTML = ['coordinator', ...DEVS, ...others].map(a => {
     const st = agents[a] || {msg: DEVS.includes(a) ? 'not started' : 'waiting', t: now, busy: false, fid: ''};
@@ -777,6 +985,7 @@ $('reviewers').addEventListener('click', e => {
   openRevs.has(r.dataset.rev) ? openRevs.delete(r.dataset.rev) : openRevs.add(r.dataset.rev);
   store.set('openrev', [...openRevs]); render();
 });
+$('winsel').addEventListener('click', e => { const b = e.target.closest('[data-win]'); if (!b) return; winSel = +b.dataset.win; store.set('actwin', winSel); render(); });
 $('openall').addEventListener('click', () => { document.querySelectorAll('.prow').forEach(r => openRows.add(r.dataset.id)); store.set('open', [...openRows]); render(); });
 $('closeall').addEventListener('click', () => { openRows.clear(); store.set('open', []); render(); });
 ['fagent','ftext','fall'].forEach(id => $(id).addEventListener('input', render));

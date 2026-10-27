@@ -320,6 +320,20 @@ def track(f, tick):
     return (fg(238) + "─" + R).join(dots)
 
 
+def waiting(evs, mc, now):
+    """Agents whose test run waits for a slot: a tlock "wait" event not yet followed by its start or give-up.
+    While a slot is free, a wait older than 10 s was stopped without logging (tlock retries every 3 s)."""
+    w = {}
+    for e in evs:
+        if e.get("kind") == "test":
+            if e["msg"] == "wait":
+                w[e["agent"]] = e["t"]
+            else:
+                w.pop(e["agent"], None)
+    free = len(mc["slots"]) < mc["slot_count"]
+    return sorted(a for a, t in w.items() if not (free and now - t > 10))
+
+
 def machine_line(mc, now):
     """One line: memory available (amber < 2 GB, red < 1 GB), swap, load vs CPUs, and who holds the test slots."""
     g = lambda b: f"{b / GIB:.1f}G"
@@ -374,8 +388,11 @@ def render(evs, tick):
 
     # Header
     wave = "".join(PULSE[(tick + n) % len(PULSE)] for n in range(8))
-    title = f" ◆ {TITLE}   {wave}   ⏱ {ago(t0, now)}   {len(evs)} events "
-    out.append(B + bgc(54) + fg(231) + title.ljust(W)[:W] + R)
+    title = f" ◆ {TITLE}   {wave}   ⏱ {ago(t0, now)}   {len(evs)} events   "
+    mode = f" REPEATED PASSES · until {until} clean in a row " if until else " ONE PASS "
+    title = title[:max(0, W - len(mode))]
+    out.append(B + bgc(54) + fg(231) + title + bgc(31 if until else 136) + fg(231) + mode + bgc(54)
+               + " " * max(0, W - len(title) - len(mode)) + R)
 
     # Progress
     valid = [f for f in findings.values() if f["state"] not in ("reported", "validating", "invalid", "duplicate")]
@@ -401,7 +418,9 @@ def render(evs, tick):
     chips = " ".join(bgc(SEV.get(s, 240)) + fg(16) + B + f" {s} {n} " + R
                      for s, n in sorted(sev_counts.items(), key=lambda x: list(SEV).index(x[0]) if x[0] in SEV else 9))
     out.append(" Severity " + (chips or DIM + "none confirmed yet" + R))
-    out.append(machine_line(machine(), now))
+    mc = machine()
+    wt = waiting(evs, mc, now)
+    out.append(machine_line(mc, now) + (f"   {fg(208)}{B}{len(wt)} waiting for a slot{R}: {', '.join(wt)}" if wt else ""))
 
     # Stage and narration
     if NOTE:
@@ -439,7 +458,8 @@ def render(evs, tick):
         ptxt = (fg(81) + f"p{p['pass']}" + R + DIM + f" {p['clean']}{'/' + str(until) if until else ''}✓ " + R) if p else ""
         left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {ptxt}{msg}")
     left.append("")
-    others = sorted({e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"})
+    others = sorted(a for a in {e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"}
+                    if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer only logs test runs
     nw = max([11] + [len(a) for a in others])
     for a in ["coordinator"] + DEVS + others:
         st = dict(agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""}))
