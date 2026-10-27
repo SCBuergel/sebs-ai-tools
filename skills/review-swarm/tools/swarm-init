@@ -16,7 +16,7 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until=0 title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -32,6 +32,7 @@ done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
 	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K] [--title TEXT]" >&2; exit 2;
 }
+case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
 repo=$(realpath "$repo")
 git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
 [ -z "$(git -C "$repo" status --porcelain)" ] || { echo "the repository has uncommitted changes" >&2; exit 1; }
@@ -55,16 +56,22 @@ chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/devqueue" "$swarm/lastmsg"
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
-case "$until" in ''|*[!0-9]*) echo "--until-clean takes a number" >&2; exit 2 ;; esac
-[ -e "$swarm/swarm.json" ] || python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" <<'EOF'
-import json, sys
+# swarm.json is written once; a rerun only records a --until-clean given now (0 turns repeated passes off)
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" <<'EOF'
+import json, os, sys
 s, title, nrev, ndev, slots, repo, source, until = sys.argv[1:]
+p = f"{s}/swarm.json"
+new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
-       "repo": repo, "source_branch": source}
-if int(until):
+       "repo": repo, "source_branch": source} if new else json.load(open(p))
+if until:
     cfg["until_clean"] = int(until)
-json.dump(cfg, open(f"{s}/swarm.json", "w"), indent=1)
+    if not cfg["until_clean"]:
+        del cfg["until_clean"]
+if until or new:
+    json.dump(cfg, open(p, "w"), indent=1)
 EOF
+until=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("until_clean", 0))' "$swarm/swarm.json")
 [ -e "$swarm/PROTOCOL.md" ] || sed -e "s|{{SW}}|$swarm|g" -e "s|{{REPO}}|$repo|g" -e "s|{{N_REV}}|$nrev|g" \
 	-e "s|{{N_DEV}}|$ndev|g" -e "s|{{SLOTS}}|$slots|g" -e "s|{{SOURCE}}|$source|g" \
 	"$here/../PROTOCOL.md" > "$swarm/PROTOCOL.md"

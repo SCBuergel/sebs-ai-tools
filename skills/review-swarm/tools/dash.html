@@ -262,7 +262,7 @@ section > header h2 { white-space: nowrap; }
     <span data-tip="<b>Last update</b><br>When this page last fetched the log. It polls every 5 seconds while the tab is visible and redraws only what changed; the dot turns orange if a fetch fails." class="muted">updated <span id="upd">–</span></span>
   </div>
   <nav>
-    <a href="#overview" data-tip="Jump to <b>Overview</b>: reviews done, finding counts, progress and the latest note.">overview</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
+    <a href="#overview" data-tip="Jump to <b>Overview</b>: areas finished, finding counts and progress. The stage and the latest notes are in the banner above it.">overview</a><a href="#machine" data-tip="Jump to <b>Machine</b>: memory, swap, load and who holds each test slot.">machine</a><a href="#agents" data-tip="Jump to <b>Agents</b>: every reviewer, the coordinator and the devs with their current status.">agents</a><a href="#pipeline" data-tip="Jump to <b>Findings pipeline</b>: each finding, its stage and its full details.">pipeline</a><a href="#live" data-tip="Jump to <b>Live feed</b>: the raw event log, newest first, with filters.">live</a>
     <button id="allbtn" data-tip="Show every section again after focusing on one, and expand them all.">⤡ show all</button>
   </nav>
 </div>
@@ -512,7 +512,7 @@ function stateOf() {
       continue;
     }
     const st = agents[a] ||= {msg:'', t:e.t, done:false, n:0, busy:false, fid:''};
-    if (['status','reported','done','idle'].includes(k)) Object.assign(st, {msg:e.msg, t:e.t, fid:i});
+    if (['status','reported','done','idle'].includes(k)) Object.assign(st, {msg:e.msg, t:e.t, fid:i, kind:k});
     else if (k === 'phase') Object.assign(st, {t:e.t, fid:i || st.fid});
     if (a.startsWith('R')) st.done = st.done || k === 'done'; else st.busy = !['idle', 'done'].includes(k);
     if (k === 'reported') st.n++;
@@ -707,6 +707,7 @@ function render() {
       (open ? revDetail(r, order.filter(i => findings[i].by === r), findings) : '');
   }).join('');
   const others = [...new Set(evs.map(e => e.agent))].filter(a => !DEVS.includes(a) && !REVIEWERS.includes(a) && !['coordinator', 'dispatcher', 'dash'].includes(a)).sort();
+  for (const a of others) if (agents[a]) agents[a].busy = agents[a].kind === 'status';  // e.g. the final reviewer: busy only while it reports work
   $('team').innerHTML = ['coordinator', ...DEVS, ...others].map(a => {
     const st = agents[a] || {msg: DEVS.includes(a) ? 'not started' : 'waiting', t: now, busy: false, fid: ''};
     const f = st.fid && findings[st.fid];
@@ -715,7 +716,7 @@ function render() {
       <span class="state ${st.busy ? 'busy' : ''}"></span><span class="name ${acls(a)}">${a}</span><span class="fid">${esc(st.fid || '')}</span><span>${steps.length ? pill(steps[steps.length-1]) : ''}</span><span class="msg">${esc(st.msg)}</span><span class="age">${ago(st.t, now)}</span>${steps.length ? `<span class="loop">${chain(steps)}</span>` : ''}</div>`;
   }).join('');
   const inrev = DEVS.filter(d => agents[d]?.busy && findings[agents[d].fid] && phaseKind(stepsOf(findings[agents[d].fid]).slice(-1)[0] || '') === 'review').length;
-  $('agentsbadge').textContent = `${revdone}/${REVIEWERS.length} reviews · ${devbusy}/${DEVS.length} devs busy · ${inrev} in review`;
+  $('agentsbadge').textContent = `${revdone}/${REVIEWERS.length} areas finished · ${devbusy}/${DEVS.length} devs busy · ${inrev} in review`;
 
   // Pipeline
   $('stages').innerHTML = STAGES.map((s, i) => `<span data-tip="<b>${s[0]}</b><br>${tesc(s[1])}">${i+1}. ${s[0]}</span>${i < 4 ? '<em>──▶</em>' : ''}`).join('');

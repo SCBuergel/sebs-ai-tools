@@ -248,7 +248,7 @@ def state_of(evs):
             continue
         st = agents.setdefault(a, {"msg": "", "t": e["t"], "done": False, "n": 0, "busy": False, "fid": ""})
         if k in ("status", "reported", "done", "idle"):
-            st.update(msg=e["msg"], t=e["t"], fid=i)
+            st.update(msg=e["msg"], t=e["t"], fid=i, kind=k)
         elif k == "phase":
             st.update(t=e["t"], fid=i or st["fid"])
         if a.startswith("R"):
@@ -383,11 +383,11 @@ def render(evs, tick):
     rej = sum(f["state"] in ("invalid", "duplicate") for f in findings.values())
     unres = sum(f["state"] == "unresolved" for f in findings.values())
     revdone = sum(1 for r in REVIEWERS if area(r, agents, findings, passes)[2])
-    head = (f" Reviews {B}{revdone}/{len(REVIEWERS)}{R} done   Findings {B}{len(findings)}{R} "
+    head = (f" Areas {B}{revdone}/{len(REVIEWERS)}{R} finished   Findings {B}{len(findings)}{R} "
             f"({fg(46)}{done} agreed{R}, {fg(177)}{len(valid) - done - unres} in pipeline{R}, "
             f"{fg(240)}{rej} rejected{R}, {fg(196)}{unres} unresolved{R})")
     if vis(head) > W:  # narrow terminal: the same counts, shorter
-        head = (f" {B}{revdone}/{len(REVIEWERS)}{R} reviews · {B}{len(findings)}{R} findings: {fg(46)}{done} agreed{R}, "
+        head = (f" {B}{revdone}/{len(REVIEWERS)}{R} areas · {B}{len(findings)}{R} findings: {fg(46)}{done} agreed{R}, "
                 f"{fg(177)}{len(valid) - done - unres} open{R}, {fg(240)}{rej} rej{R}, {fg(196)}{unres} unres{R}")
     tail = f" {done}/{len(valid)}"
     inline = W - vis(head) - len(tail) - 3 >= 10  # room for the bar on the same line
@@ -440,16 +440,19 @@ def render(evs, tick):
         left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {ptxt}{msg}")
     left.append("")
     others = sorted({e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"})
+    nw = max([11] + [len(a) for a in others])
     for a in ["coordinator"] + DEVS + others:
         st = dict(agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""}))
         if a in DEVS and st["fid"] in findings and findings[st["fid"]]["state"] not in OPEN:
             st["busy"] = False  # its finding is closed: the dev is idle even if it never said so
+        if a in others:
+            st["busy"] = st.get("kind") == "status"  # e.g. the final reviewer: busy only while it reports work
         icon = fg(220) + SPIN[tick % len(SPIN)] + R if st["busy"] else fg(240) + "◌" + R
         fid = (B + f"{st['fid']:<6}" + R) if st["fid"] else " " * 6
         steps = steps_of(findings[st["fid"]]) if a in DEVS and st["busy"] and st["fid"] in findings else []
         tag = ptag(steps[-1]) + " " if steps else ""
-        left.append(f"{icon} {fg(agent_col(a))}{B}{a.upper():<11}{R} {fid} {tag}"
-                    f"{cut(st['msg'], leftw - 31 - vis(tag))} {DIM}{ago(st['t'], now)}{R}")
+        left.append(f"{icon} {fg(agent_col(a))}{B}{a.upper():<{nw}}{R} {fid} {tag}"
+                    f"{cut(st['msg'], leftw - 20 - nw - vis(tag))} {DIM}{ago(st['t'], now)}{R}")
         if steps:
             left.append("  " + DIM + "loop " + R + chain(steps, leftw - 11))
     lbox = box("AGENTS", left, leftw, 99)
