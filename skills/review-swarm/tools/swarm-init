@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
-#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K] [--title TEXT]
+#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--title TEXT]
 #
-# --until-clean K records in swarm.json that each area's reviewer is rerun fresh until K passes in a row
-# find nothing (SKILL.md, "Repeated passes"); without it every reviewer runs once.
+# By default each area's reviewer is rerun fresh until 2 passes in a row find nothing (SKILL.md,
+# "Repeated passes"); --until-clean K sets that number, --one-pass (the same as --until-clean 0) runs
+# every reviewer once. swarm.json records it as until_clean; a rerun without either option keeps it.
 #
 # Run from the repository on a clean checkout of the branch the review starts from (the source
 # branch, usually main). It creates, or completes when run again:
@@ -25,12 +26,13 @@ while [ $# -gt 0 ]; do
 		--devs) ndev=$2; shift 2 ;;
 		--slots) slots=$2; shift 2 ;;
 		--until-clean) until=$2; shift 2 ;;
+		--one-pass) until=0; shift ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--title TEXT]" >&2; exit 2;
 }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
 repo=$(realpath "$repo")
@@ -56,18 +58,16 @@ chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/devqueue" "$swarm/lastmsg"
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
-# swarm.json is written once; a rerun only records a --until-clean given now (0 turns repeated passes off)
+# swarm.json is written once; a rerun only records a --until-clean or --one-pass given now
 python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" <<'EOF'
 import json, os, sys
 s, title, nrev, ndev, slots, repo, source, until = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
-       "repo": repo, "source_branch": source} if new else json.load(open(p))
+       "repo": repo, "source_branch": source, "until_clean": 2} if new else json.load(open(p))
 if until:
     cfg["until_clean"] = int(until)
-    if not cfg["until_clean"]:
-        del cfg["until_clean"]
 if until or new:
     json.dump(cfg, open(p, "w"), indent=1)
 EOF
@@ -94,7 +94,7 @@ done
 cat <<EOF
 swarm folder: $swarm
 repository:   $repo on swarm-review (from $source at $(git -C "$repo" rev-parse --short HEAD))
-reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean passes in a row)")   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
+reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean passes in a row)" || echo " (one pass each)")   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
 next:         fill in the task sections of $swarm/PROTOCOL.md, then start the agents
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
 EOF

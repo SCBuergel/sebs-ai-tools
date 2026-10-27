@@ -77,8 +77,10 @@ repository:
     --reviewers N --devs M --slots S --title "<repo> review swarm"
 ```
 
-Add `--until-clean K` when the user wants each area reviewed again and again
-until K passes in a row find nothing (see "Repeated passes" below).
+By default each area is reviewed again and again by a fresh reviewer until 2
+passes in a row find nothing worth fixing (see "Repeated passes" below). Pass
+`--one-pass` when the user asks for a quicker check with one reviewer per
+area, or `--until-clean K` for a different number of clean passes.
 
 It copies the tools, writes `swarm.json`, `PROTOCOL.md` and `severity.md`,
 creates branch `swarm-review` at HEAD and checks it out in the repository (the
@@ -133,8 +135,8 @@ agent; a dev's commit-reviewer inherits the dev's.
 ## 5. Dispatch
 
 When the first reviewer starts, log `$SW/ev dispatcher stage - "reviewing <N>
-areas"`. Run this loop until every finding is agreed, rejected or
-unresolved. Record each transition with `$SW/ev dispatcher <kind> <id>
+areas"`. Run this loop until every area is finished (see "Repeated
+passes") and every finding is agreed, rejected or unresolved. Record each transition with `$SW/ev dispatcher <kind> <id>
 "<msg>"`, kinds `validating`, `valid <severity>` (written by `devqueue`),
 `invalid`, `duplicate`, `dev` (handed to a dev), `coord` (fix being checked
 by the coordinator), `rev` (by the reporting reviewer), `agreed`,
@@ -172,8 +174,9 @@ waiting on the final reviewer"`), `final-fix`, `merge`, `done`.
    reasons to the coordinator as part of a new `CHECK <id>`, log `coord`; the
    coordinator decides whether they become a REVISE. A reviewer that no
    longer exists (its session ended) is skipped: log `agreed` on CONFIRMED.
-8. A reviewer reports `done`: nothing to do. When all reviewers are done,
-   the queue is empty and every dev is idle, go to section 6.
+8. A reviewer reports `done`: nothing to do until its pass is closed (see
+   "Repeated passes"). When every area is finished, the queue is empty and
+   every dev is idle, go to section 6.
 
 A dev must not fast-forward `swarm-review` before its post-rebase test run
 has passed; remind it if the log shows `merge` before the tests ended. If a
@@ -181,23 +184,27 @@ dev's message is lost, `$SW/lastmsg <agent id>` prints its last reply.
 
 ### Repeated passes
 
-With `--until-clean K` (`until_clean` in `swarm.json`), an area is not
-finished when its reviewer is: once that reviewer is done and every finding
-it reported is agreed, rejected or unresolved, a fresh reviewer reviews the
-area again on the fixed tree, until K passes in a row have no finding the
-coordinator accepted. Track it with `pass` events (id `-`; the message starts
+Unless the swarm was set up with `--one-pass` (`until_clean` in `swarm.json`
+is 0, or missing in a swarm set up before 0.3.0), an area is not finished
+when its reviewer is: once that reviewer is done and every finding it
+reported is agreed, rejected or unresolved, a fresh reviewer reviews the area
+again on the fixed tree, until `until_clean` passes in a row (2 by default)
+have no finding the coordinator accepted. The fresh reviewer starts with no
+memory of earlier passes, so that what the earlier reviewers learned does not
+steer it: it gets the same brief, and nothing about earlier findings. The
+coordinator rejects a finding it rejected before again. With `--one-pass`,
+an area is finished when its reviewer is done; skip the `pass` events. Track it with `pass` events (id `-`; the message starts
 with the reviewer), which the dashboards turn into a pass column per area:
 
 - `$SW/ev dispatcher pass - "R3 1 started"` when the first reviewer of the
   area starts.
 - When pass p of R3 is closed: `"R3 <p> clean"` if none of its findings was
-  validated, otherwise `"R3 <p> not clean"`. With K clean passes in a row,
+  validated, otherwise `"R3 <p> not clean"`. With `until_clean` clean passes in a row,
   log `"R3 <p> finished"` and stop; otherwise start the next pass.
 - Next pass: `git -C <repo> worktree add --detach $SW/base-R3-p<p+1>
   swarm-review`, fill the reviewer brief with that tree as `{{TREE}}` and the
-  next free number as `{{FIRST_N}}`, add the titles of the area's earlier
-  findings so it does not report them again, start it as a new agent named
-  R3, record it in `ids.txt` as `R3-p<p+1> <id>`, and log
+  next free number as `{{FIRST_N}}`, and nothing else changed, start it as a
+  new agent named R3, record it in `ids.txt` as `R3-p<p+1> <id>`, and log
   `"R3 <p+1> started"`. A VERIFY goes to the reviewer of the pass that
   reported the finding while it exists.
 - If the user stops an area early: `"R3 <p> stopped"`.

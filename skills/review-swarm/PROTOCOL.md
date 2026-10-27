@@ -24,8 +24,10 @@ and anything a reviewer must know to judge a finding. -->
   it meets the validation.
 
 ## Trees
-- $SW/base: a detached worktree of {{SOURCE}} as it was when the swarm started. Reviewers and the
-  coordinator read this when judging a finding. Nobody edits it.
+- $SW/base: a detached worktree of {{SOURCE}} as it was when the swarm started. First-pass reviewers
+  read this. A later pass of an area reads its own detached worktree $SW/base-R<n>-p<pass>, made from
+  `swarm-review` when the pass starts. The coordinator judges a finding against the tree it names.
+  Nobody edits these trees.
 - $SW/dev1..$SW/dev{{N_DEV}}: one worktree per dev, on branch `swarm-dev1`..`swarm-dev{{N_DEV}}`. A dev edits,
   tests and commits only in its own worktree. Before starting a finding it runs `git rebase swarm-review`
   there.
@@ -49,7 +51,7 @@ addresses round k's findings; "merge": rebase and fast-forward of swarm-review).
 
 ## Findings
 A reviewer writes each finding to $SW/queue/<id>.json (id = its name and a running number, R3-2)
-with the keys id, reviewer, title, severity, file, line, description, failure_scenario,
+with the keys id, reviewer, title, tree (the worktree the reviewer read), severity, file, line, description, failure_scenario,
 suggested_fix, and announces it with `$SW/ev R3 reported R3-2 "<title>"`. The coordinator's verdict
 goes to $SW/val/<id>.txt, its check of the fix to $SW/val/<id>.check.txt.
 

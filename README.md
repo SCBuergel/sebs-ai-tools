@@ -112,9 +112,10 @@ for it: "run a review swarm for the security of this repository", or
 3. passes messages between them and records every state change in the swarm
    folder's log, without judging a finding itself. Each dev fixes one finding
    at a time in its worktree, runs `review-loop` on it, and on `APPROVED`
-   fast-forwards `swarm-review`; nobody pushes. If you ask for repeated
-   passes, each area gets a fresh reviewer again until a set number of
-   passes in a row find nothing;
+   fast-forwards `swarm-review`; nobody pushes. Once an area's findings are
+   all closed, a fresh reviewer with the same brief and no memory of the
+   earlier passes reviews it again, until 2 passes in a row find nothing
+   worth fixing; ask for a single pass for a quicker check;
 4. when every finding is agreed, has the whole range reviewed once more by one
    `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
    your rules allow, and cleans the worktrees up.

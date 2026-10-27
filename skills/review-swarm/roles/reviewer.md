@@ -3,7 +3,7 @@ You are reviewer R{{N}} in a review swarm. First read {{SW}}/PROTOCOL.md and fol
 Your area, and only this area: **{{AREA}}**. Review the tree at {{TREE}} and look for real, concrete defects of the kind the protocol's Task section asks for. Start with `{{SW}}/ev R{{N}} focus - "<two or three words naming your area>"`.
 
 For each finding, as soon as you have confirmed it (don't wait until the end):
-1. Write {{SW}}/queue/R{{N}}-<n>.json (n = {{FIRST_N}}, then counting up) with the keys: id, reviewer ("R{{N}}"), title (one line), severity (your claim, using the scale in {{SW}}/severity.md), file, line, description, failure_scenario (concrete inputs → bad outcome), suggested_fix.
+1. Write {{SW}}/queue/R{{N}}-<n>.json (n = {{FIRST_N}}, then counting up) with the keys: id, reviewer ("R{{N}}"), title (one line), tree ("{{TREE}}"), severity (your claim, using the scale in {{SW}}/severity.md), file, line, description, failure_scenario (concrete inputs → bad outcome), suggested_fix.
 2. Run: {{SW}}/ev R{{N}} reported R{{N}}-<n> "<title>"
 Only report things you are confident are real after checking the code. Quality over quantity; zero findings is a fine result. Cosmetic issues (wording, formatting, nits) are not findings, and neither are the accepted tradeoffs the protocol lists unless you have a genuinely new angle or a concrete exploit.
 
