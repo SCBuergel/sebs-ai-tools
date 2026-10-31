@@ -22,8 +22,18 @@
       "source": "./skills/test-gnosis-vpn",
       "strict": false,
       "skills": ["./"],
-      "version": "0.5.1",
+      "version": "0.6.0",
       "description": "Install, fund and test the latest Gnosis VPN client on a remote Linux server over SSH without locking yourself out, from a throwaway VM to returning its funds.",
+      "author": { "name": "Sebastian C. Bürgel" },
+      "license": "MIT"
+    },
+    {
+      "name": "report-gnosis-vpn-results",
+      "source": "./skills/report-gnosis-vpn-results",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Report, summarize and compare Gnosis VPN test results from gnosis_vpn-bench runs in a standard way, and push them to a private results repository after confirmation.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
     },

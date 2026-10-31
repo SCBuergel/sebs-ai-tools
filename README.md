@@ -17,7 +17,8 @@ same name, so you install only what you want.
 | Skill | What it does |
 | --- | --- |
 | `write-clear-explainers` | Writes and reviews technical explainers and mixed explanation/procedure docs for readers who are technical but new to the system. |
-| `test-gnosis-vpn` | Installs, funds and tests the latest Gnosis VPN client on a remote Linux server over SSH, or on a throwaway DigitalOcean VM that it destroys afterwards, after sending the funds back. It measures download speed and ping per second, or checks every exit. It runs commands as root on that server, changes its routes and firewall rules, and starts a watchdog on it: if the heartbeat you send over SSH stops for 6 minutes, the watchdog tears the VPN down, and after 12 minutes it reboots the server once. |
+| `test-gnosis-vpn` | Installs, funds and tests the latest Gnosis VPN client on a remote Linux server over SSH, or on throwaway DigitalOcean VMs that it destroys afterwards, after sending the funds back. It measures with [`gnosis_vpn-bench`](https://github.com/SCBuergel/gnosis_vpn-bench): speed and ping on one exit, a concurrent ladder, or a check of every exit. It runs commands as root on that server, changes its routes and firewall rules, and starts a watchdog on it: if the heartbeat you send over SSH stops for 6 minutes, the watchdog tears the VPN down, and after 12 minutes it reboots the server once. |
+| `report-gnosis-vpn-results` | Reports, summarizes and compares Gnosis VPN test results from `gnosis_vpn-bench` runs in a standard way: it builds the report with the bench's renderer, puts versions, network, exit, VMs and date at the top of every summary, never reports a failure as zero speed or a short check as a throughput result, and pushes only allowlisted result files to a private results repository after you confirm. |
 | `review-loop` | Gets everything not pushed yet reviewed by the `commit-reviewer` agent: fixes the findings it returns, resubmits to the same reviewer so that it remembers earlier rounds, and pushes only on `APPROVED`, for at most four rounds. |
 | `review-swarm` | Makes the session the dispatcher of a swarm: reviewer agents audit one area of the repository each, a coordinator validates and rates their findings, and dev agents fix them in parallel in their own git worktrees, each fix reviewed by the dev's own `commit-reviewer`. Ships the briefs for every role, a shared event log, a test-slot lock, a guarded fast-forward that merges a fix only when tested on its HEAD and unchanged since approval, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
 
@@ -34,6 +35,7 @@ as `<plugin>@sebs-ai-tools`:
 claude plugin marketplace add SCBuergel/sebs-ai-tools
 claude plugin install write-clear-explainers@sebs-ai-tools
 claude plugin install test-gnosis-vpn@sebs-ai-tools
+claude plugin install report-gnosis-vpn-results@sebs-ai-tools
 claude plugin install review-loop@sebs-ai-tools
 claude plugin install commit-reviewer@sebs-ai-tools
 claude plugin install review-swarm@sebs-ai-tools
@@ -55,6 +57,7 @@ share a name, the name appears twice:
 ```text
 /write-clear-explainers:write-clear-explainers
 /test-gnosis-vpn:test-gnosis-vpn
+/report-gnosis-vpn-results:report-gnosis-vpn-results
 /review-loop:review-loop
 /review-swarm:review-swarm
 ```
