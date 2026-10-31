@@ -15,7 +15,7 @@ cases:
   funds and deletes the VMs. `./gnosis_vpn-bench execute RUN` does all of it
   for every target of the run and tears down even after an error or Ctrl-C;
   `--keep` keeps the VMs until the deletion timer fires. Each step also
-  runs on its own. Read its `docs/runbook.md` first; sections 0,
+  runs on its own. Results are pushed before teardown (section 5). Read its `docs/runbook.md` first; sections 0,
   4 and 6 below still apply.
 - **A server the user names**: install, fund and guard it by hand (sections
   0-4), then measure with `./gnosis_vpn-bench --ssh root@HOST <mode>`.
@@ -165,9 +165,18 @@ with shortened gaps instead of full multi-hour runs, and report package and
 client versions and per-command pass/fail. Treat a stalled transfer that hits
 its timeout as a VPN observation, not a tool bug.
 
+**Results are pushed before teardown, without asking.** The user decided
+this standing rule on 2026-10-31. Bench does it: `ladder`, `sweep` and
+`execute` push to the private results repository before `recover` and
+`destroy`; do not pass `--no-push` unless the user asks. If the output says
+`RESULTS NOT PUSHED`, tell the user at once, but let teardown and the VM
+deletion deadline go ahead: the results stay in the local run directory.
+The `report-gnosis-vpn-results` skill has the details.
+
 ## 6. Return funds and destroy
 
-Only when the user asks. On a bench run: `recover RUN`, then `destroy RUN`.
+On a bench run, after the push (section 5), even one that reported
+`RESULTS NOT PUSHED`: `recover RUN`, then `destroy RUN`; `execute` does both. On a server the user names, only when the user asks.
 Recover stops workers, then guards, then the heartbeat; closes channels;
 returns the funds to the funding Safe; and audits the receipts. Destroy
 re-checks recovery on-chain and deletes only this run's tagged VMs. Both ask

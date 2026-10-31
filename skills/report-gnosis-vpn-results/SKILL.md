@@ -1,6 +1,6 @@
 ---
 name: report-gnosis-vpn-results
-description: Report, summarize or compare Gnosis VPN test results in the standard way, from the result files of a gnosis_vpn-bench run (concurrent ladder, per-client bandwidth, exit sweep, availability checks), and push them to the private results repository after the user confirms. Use when asked to report, summarize, write up or compare Gnosis VPN results, benchmarks, ladders, sweeps or exit checks, or to publish them.
+description: Report, summarize or compare Gnosis VPN test results in the standard way, from the result files of a gnosis_vpn-bench run (concurrent ladder, per-client bandwidth, exit sweep, availability checks), and push them to the private results repository as soon as a run has produced them. Use when asked to report, summarize, write up or compare Gnosis VPN results, benchmarks, ladders, sweeps or exit checks, or to publish them.
 ---
 
 # Reporting Gnosis VPN test results
@@ -98,24 +98,33 @@ client version.
 
 ## 5. Push and combine
 
-Run these in the gnosis_vpn-bench checkout. Each one scans, commits and asks
-before pushing:
+**A run's results are pushed as soon as it has produced them, without asking,
+and before its machines are torn down.** The user decided this standing rule
+on 2026-10-31, and bench does it: `ladder` and `sweep` push right after
+writing their results, and `execute` pushes after each target and once more
+with all of the run's results before `recover` and `destroy`. Do not pass
+`--no-push` unless the user asks. Push by hand only when a run's results are
+not in the repository yet:
 
 ```bash
-./gnosis_vpn-bench results push RUN [RUN ...] --report-name N --title T --dry-run
-./gnosis_vpn-bench results push RUN [RUN ...] --report-name N --title T
+./gnosis_vpn-bench results push RUN [RUN ...] [--report-name N] [--title T] [--dry-run]
 ./gnosis_vpn-bench results combine REC [REC ...] --name N --title T   # recordings already in the repo
 ./gnosis_vpn-bench results link REPORT LABEL URL                      # e.g. the Claude-app page
 ```
 
-`push` adds each run's recordings and one report over all of them. It copies
-only allowlisted files and refuses when its scan finds keys, tokens or IP
-addresses, or when the repository is public. Never copy files into the
+These commands do not ask (`--ask` makes them). `push` adds each run's
+recordings and one report over all of them, by default at
+`reports/<run id>/`. It copies only allowlisted files (`result.json`,
+`provenance.json`, `report.html`, `README.md`, `report.json`,
+`charts/*.svg`), never logs, and refuses when its scan finds keys, tokens or
+IP addresses, or when the repository is public. Never copy files into the
 results repository by hand.
 
-Show the user the dry run and push after they confirm. If the user has said
-to push every run right away, push as soon as the results exist, without
-waiting for teardown, and still never pass `--yes` unless they said so.
+A failed or refused push prints `RESULTS NOT PUSHED`. Do not work around it:
+never weaken the scan, drop files or copy by hand. Tell the user at once what
+it said. The results stay in the local run directory, and teardown and the
+VM deletion timer go ahead regardless; do not hold them back while waiting
+for an answer.
 
 ## 6. After a run
 
