@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
-#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass]
-#              [--test-cmd CMD] [--title TEXT]
+#   swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S]
+#              [--until-clean K | --one-pass] [--regen-cmd CMD] [--title TEXT]
 #
-# --test-cmd records the repository's full test command in swarm.json (test_cmd): ffmerge then merges a
-# dev's branch only after a passing run of exactly that command through tlock on its HEAD.
+# --test-cmd records the repository's full test command in swarm.json (test_cmd): the merge queue
+# (`board mergeq`) fast-forwards swarm-review only after a passing run of it on the exact rebased commit.
+# --validators sets how many validators the supervisor keeps alive (default 2). --regen-cmd records the
+# command that regenerates derived totals (test counts in the docs, for example); devs never edit those
+# by hand, and the supervisor runs it once before the final review.
 # By default each area's reviewer is rerun fresh until 2 passes in a row find nothing (SKILL.md,
 # "Repeated passes"); --until-clean K sets that number, --one-pass (the same as --until-clean 0) runs
 # every reviewer once. swarm.json records it as until_clean; a rerun without either option keeps it.
 #
 # Run from the repository on a clean checkout of the branch the review starts from (the source
 # branch, usually main). It creates, or completes when run again:
-#   the swarm folder with the tools next to this script, swarm.json, PROTOCOL.md, severity.md,
-#   an empty events.jsonl, queue/, val/, slots/count and ids.txt;
+#   the swarm folder with the tools next to this script, swarm.json, PROTOCOL.md, severity.md, rules.md,
+#   an empty events.jsonl, state/, queue/, val/, verdicts/, slots/count and ids.txt;
 #   branch swarm-review at HEAD, checked out in the repository (the integration tree);
 #   SWARM/base, a detached worktree at HEAD that nobody edits (what reviewers read);
-#   SWARM/dev1..devM, one worktree per dev on branch swarm-dev1..M.
+#   SWARM/dev1..devM, one worktree per dev on branch swarm-dev1..M;
+#   SWARM/merge, a detached worktree where the merge queue rebases and tests.
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until= tcmd= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= tcmd= regen= nval= title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -31,13 +35,16 @@ while [ $# -gt 0 ]; do
 		--until-clean) until=$2; shift 2 ;;
 		--one-pass) until=0; shift ;;
 		--test-cmd) tcmd=$2; shift 2 ;;
+		--regen-cmd) regen=$2; shift 2 ;;
+		--validators) nval=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M [--slots S] [--until-clean K | --one-pass] [--test-cmd CMD] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--regen-cmd CMD] [--title TEXT]" >&2; exit 2;
 }
+[ -n "$tcmd" ] || [ -s "$swarm/swarm.json" ] || { echo "--test-cmd is required: the merge queue tests every change with it" >&2; exit 2; }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
 repo=$(realpath "$repo")
 git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
@@ -54,28 +61,28 @@ fi
 if [ -z "$slots" ] && [ -s "$swarm/slots/count" ]; then slots=$(cat "$swarm/slots/count"); fi
 [ -n "$slots" ] || slots=$(( ($(nproc) + 1) / 2 )); [ "$slots" -ge 1 ] || slots=1
 
-mkdir -p "$swarm" "$swarm/queue" "$swarm/val" "$swarm/slots"
-for f in ev tlock ffmerge devqueue lastmsg dash.py dash.html dashweb.py; do
+mkdir -p "$swarm" "$swarm/state" "$swarm/queue" "$swarm/val" "$swarm/verdicts" "$swarm/slots"
+for f in ev tlock board lastmsg dash.py dash.html dashweb.py; do
 	[ -e "$swarm/$f" ] || cp "$here/$f" "$swarm/$f"
 done
-chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/ffmerge" "$swarm/devqueue" "$swarm/lastmsg"
+chmod +x "$swarm/ev" "$swarm/tlock" "$swarm/board" "$swarm/lastmsg"
 echo "$slots" > "$swarm/slots/count"
 touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
-# swarm.json is written once; a rerun only records a --until-clean, --one-pass or --test-cmd given now
-python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" <<'EOF'
+[ -e "$swarm/rules.md" ] || cp "$here/../rules.md" "$swarm/rules.md"
+# swarm.json is written once; a rerun only records the options given now
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" <<'EOF'
 import json, os, sys
-s, title, nrev, ndev, slots, repo, source, until, tcmd = sys.argv[1:]
+s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
-cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots),
+cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots), "validators": 2,
        "repo": repo, "source_branch": source, "until_clean": 2} if new else json.load(open(p))
-if until:
-    cfg["until_clean"] = int(until)
-if tcmd:
-    cfg["test_cmd"] = tcmd
-if until or tcmd or new:
-    json.dump(cfg, open(p, "w"), indent=1)
+for key, val in (("until_clean", until and int(until)), ("test_cmd", tcmd), ("regen_cmd", regen),
+                 ("validators", nval and int(nval))):
+    if val != "":
+        cfg[key] = val
+json.dump(cfg, open(p, "w"), indent=1)
 EOF
 until=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("until_clean", 0))' "$swarm/swarm.json")
 [ -e "$swarm/PROTOCOL.md" ] || sed -e "s|{{SW}}|$swarm|g" -e "s|{{REPO}}|$repo|g" -e "s|{{N_REV}}|$nrev|g" \
@@ -86,10 +93,16 @@ python3 - "$swarm" <<'EOF'
 import json, re, sys
 s = sys.argv[1]
 t = json.load(open(f"{s}/swarm.json")).get("test_cmd")
-line = (f"`{t}`. ffmerge merges only after a passing run of exactly this command on the HEAD it merges"
+line = (f"`{t}`. The merge queue fast-forwards swarm-review only after a passing run of it on the exact rebased commit"
         if t else "not recorded; use the repository guide's full test command")
 p = open(f"{s}/PROTOCOL.md").read()
 p = re.sub(r"(Full test command \(test_cmd in swarm\.json\): ).*", lambda m: m.group(1) + line + ".", p.replace("{{TEST_CMD}}", line + "."))
+g = json.load(open(f"{s}/swarm.json")).get("regen_cmd")
+regen = (f"The supervisor regenerates them once, with `{g}`, before the final review." if g else
+         "If the repository has such totals, leave them; the supervisor updates them once before the final review.")
+regen += " Only if a test checks a total does a fix update it, as part of the same change."
+p = re.sub(r"(Never edit derived totals by hand, such as test counts in the docs\. ).*",
+           lambda m: m.group(1) + regen, p.replace("{{REGEN}}", regen))
 open(f"{s}/PROTOCOL.md", "w").write(p)
 EOF
 
@@ -100,6 +113,7 @@ else
 fi
 git -C "$repo" checkout -q swarm-review
 [ -d "$swarm/base" ] || git -C "$repo" worktree add -q --detach "$swarm/base" swarm-review
+[ -d "$swarm/merge" ] || git -C "$repo" worktree add -q --detach "$swarm/merge" swarm-review
 for i in $(seq 1 "$ndev"); do
 	[ -d "$swarm/dev$i" ] && continue
 	if git -C "$repo" show-ref --verify --quiet "refs/heads/swarm-dev$i"; then
@@ -112,6 +126,7 @@ cat <<EOF
 swarm folder: $swarm
 repository:   $repo on swarm-review (from $source at $(git -C "$repo" rev-parse --short HEAD))
 reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean passes in a row)" || echo " (one pass each)")   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
-next:         fill in the task sections of $swarm/PROTOCOL.md, then start the agents
+next:         fill in the Task section of $swarm/PROTOCOL.md and $swarm/rules.md, then start the agents
+board:        $swarm/board tick      $swarm/board show      merge queue: python3 $swarm/board mergeq
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
 EOF

@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+"""The swarm's work board: every finding's state, claimed and moved on by the agents themselves.
+
+Each finding is a file state/<id>.json moving through fixed states:
+  reported -> validating -> valid -> dev -> queued -> rev -> agreed
+with the exits invalid, duplicate and unresolved, and revise (back with the same dev) from queued or rev.
+The finding's text stays in queue/<id>.json (the reviewer's) and the verdicts in val/ (the validators').
+Agents pull work whose state matches their role with `next`, and write the result back with one of the
+commands below. Every change runs under one lock and is logged to events.jsonl as agent "board", so the
+dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, V1, dev2):
+
+  board report AGENT ID              reviewer: queue/ID.json is written; ID enters the board
+  board next AGENT ROLE [--wait S]   claim the next piece of work: ROLE validator, dev or verify
+  board verdict AGENT ID             validator: val/ID.txt is written (VALID ID SEV, INVALID ID, DUPLICATE ID of X)
+  board escalate AGENT NEW ID...     validator: one design finding NEW (<area>-D<n>) replaces the IDs; write
+                                     queue/NEW.json and val/NEW.txt first
+  board submit AGENT ID SHA          dev: the change at SHA was APPROVED by AGENT-reviewer; into the merge queue
+  board await AGENT ID [--wait S]    dev: wait for AGENT-reviewer's verdict on ID; prints it
+  board confirm AGENT ID             verifier: the merged fix resolves the finding -> agreed
+  board refuse AGENT ID              verifier: val/ID.refused.txt says why -> revise, back to the dev
+  board block AGENT ID WHY           dev: no fix path -> unresolved
+  board dispute AGENT ID             dev: val/ID.dispute.txt argues against the requirements -> revalidated
+  board release AGENT ID             give a claim back
+  board beat AGENT                   keep AGENT's claims alive while it waits on something the log does not show
+  board flag NAME on|off             supervisor: wind-down (devs take no new findings) or paused
+  board pass AREA start|stop         supervisor: start the area's next review pass (prints its tree), or stop it
+  board tick                         supervisor: release dead claims, close passes, print what to do
+  board watch                        supervisor: wait until tick has something new to do, print it, exit
+  board show [ID]                    the board, or one finding's history
+  board mergeq                       the merge queue: runs until stopped (the supervisor starts it once)
+
+A claim is a lease: it stays the owner's while the owner, or the owner's commit-reviewer, logged an event
+or a test run, or ran `board` in the last LEASE seconds. A dead claim goes back on the board for others.
+"""
+import fcntl, glob, json, os, re, shlex, subprocess, sys, time
+
+S = os.path.dirname(os.path.abspath(__file__))
+B = os.path.join(S, "state")
+LEASE = 900           # a claim without a sign of life for 15 min is released
+ORPHAN_VERIFY = 1200  # a merged fix nobody verified for 20 min may be verified by a validator
+MAX_ROUNDS = 3        # a finding back with its dev more often than this is unresolved
+RETIRE = 8            # a validator ends after this many verdicts, so its context stays small
+RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+FINAL = ("agreed", "invalid", "duplicate", "unresolved")
+OPEN = ("reported", "validating", "valid", "dev", "revise", "queued", "rev")
+
+
+def cfg():
+    return json.load(open(os.path.join(S, "swarm.json")))
+
+
+def log(agent, kind, fid, msg):
+    e = {"t": time.time(), "agent": agent, "kind": kind, "id": fid or "", "msg": str(msg)[:300]}
+    with open(os.path.join(S, "events.jsonl"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps(e) + "\n")
+
+
+def events():
+    out = []
+    for line in open(os.path.join(S, "events.jsonl")):
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+class Locked:
+    def __enter__(self):
+        os.makedirs(B, exist_ok=True)
+        self.f = open(os.path.join(B, ".lock"), "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def load(fid):
+    p = os.path.join(B, fid + ".json")
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def save(f):
+    p = os.path.join(B, f["id"] + ".json")
+    json.dump(f, open(p + ".tmp", "w"), indent=1)
+    os.replace(p + ".tmp", p)
+
+
+def findings():
+    return {f["id"]: f for f in (json.load(open(p)) for p in sorted(glob.glob(os.path.join(B, "*.json"))))}
+
+
+def move(f, state, by, msg, owner=None):
+    """Set the finding's state and owner, record it in its history and log it as a board event."""
+    f.update(state=state, owner=owner, since=time.time())
+    f.setdefault("history", []).append({"t": time.time(), "by": by, "state": state, "msg": msg})
+    save(f)
+    log("board", state, f["id"], msg)
+
+
+def text(fid):
+    q = os.path.join(S, "queue", fid + ".json")
+    return json.load(open(q)) if os.path.exists(q) else {}
+
+
+def beat(agent):
+    os.makedirs(B, exist_ok=True)
+    with open(os.path.join(B, agent + ".beat"), "w") as f:
+        f.write(str(time.time()))
+
+
+def last_sign(agent, evs):
+    """When AGENT last showed it is alive: its events, its commit-reviewer's, its test runs, its board calls."""
+    t = max((e["t"] for e in evs if e["agent"] in (agent, agent + "-reviewer")), default=0)
+    p = os.path.join(B, agent + ".beat")
+    return max(t, os.path.getmtime(p) if os.path.exists(p) else 0)
+
+
+def stopped(agent, evs):
+    """AGENT's last own event says it ended."""
+    mine = [e for e in evs if e["agent"] == agent]
+    return bool(mine) and mine[-1]["kind"] == "stopped"
+
+
+def flags():
+    p = os.path.join(B, ".flags.json")
+    return json.load(open(p)) if os.path.exists(p) else {}
+
+
+def die(msg):
+    sys.exit("board: " + msg)
+
+
+def need(f, fid, states, agent=None):
+    if not f:
+        die(f"no finding {fid} on the board")
+    if f["state"] not in states:
+        die(f"{fid} is {f['state']}, not {' or '.join(states)}")
+    if agent and f.get("owner") != agent:
+        die(f"{fid} is claimed by {f.get('owner') or 'nobody'}, not {agent}; run `board next` for other work")
+
+
+# ---- releasing dead claims ------------------------------------------------------------------------
+
+def reap(fs, evs):
+    """Put claims whose owner shows no sign of life back on the board. Returns the notes it logged."""
+    now, notes = time.time(), []
+    for f in fs.values():
+        o = f.get("owner")
+        if not o or f["state"] not in ("validating", "dev", "revise", "rev"):
+            continue
+        if now - max(last_sign(o, evs), f.get("since", 0)) < LEASE and not stopped(o, evs):
+            continue
+        back = {"validating": "reported", "dev": "revise" if f.get("sha") else "valid"}.get(f["state"], f["state"])
+        msg = f"{o} silent for {LEASE // 60} min or stopped; claim released"
+        move(f, back, "board", msg if back != "valid" else f.get("severity") or msg, owner=None)
+        log("board", "note", "", f"{f['id']}: {msg}")
+        notes.append(f"{f['id']}: {msg}")
+    return notes
+
+
+# ---- claiming work --------------------------------------------------------------------------------
+
+def area_of(fid):
+    return fid.split("-")[0]
+
+
+def pick(agent, role, fs, evs):
+    now = time.time()
+    if flags().get("paused"):
+        return None
+    if role == "validator":
+        if verdicts(agent, fs) >= RETIRE:
+            return None
+        todo = sorted((f for f in fs.values() if f["state"] == "reported"), key=lambda f: f.get("since", 0))
+        if todo:
+            return todo[0], "validating", agent, "validate"
+        orphan = [f for f in fs.values() if f["state"] == "rev" and not f.get("owner")
+                  and (now - f.get("since", now) > ORPHAN_VERIFY
+                       or stopped(area_of(f["id"]), evs)) and area_of(f["id"]) != "F"]
+        if orphan:
+            return orphan[0], "rev", agent, "verify"
+        return None
+    if role == "verify":
+        mine = [f for f in fs.values() if f["state"] == "rev" and not f.get("owner") and area_of(f["id"]) == agent]
+        return (mine[0], "rev", agent, "verify") if mine else None
+    if role == "dev":
+        gone = lambda d: not d or stopped(d, evs) or now - last_sign(d, evs) > LEASE
+        back = [f for f in fs.values() if f["state"] == "revise" and (f.get("dev") == agent or gone(f.get("dev")))]
+        back.sort(key=lambda f: (f.get("dev") != agent, f.get("since", 0)))
+        if back:
+            return back[0], "dev", agent, "revise"
+        if flags().get("wind-down"):
+            return None
+        mine_last = [f for f in fs.values() if f.get("dev") == agent and f["state"] in ("queued", "rev", "agreed")]
+        mine_last.sort(key=lambda f: f.get("since", 0))
+        near = text(mine_last[-1]["id"]).get("file") if mine_last else None
+        held = {text(f["id"]).get("file") for f in fs.values() if f["state"] in ("dev", "revise") and f.get("dev") != agent}
+        todo = [f for f in fs.values() if f["state"] == "valid"]
+        todo.sort(key=lambda f: (RANK.get(f.get("severity"), 9),
+                                 text(f["id"]).get("file") in held,
+                                 not near or text(f["id"]).get("file") != near,
+                                 f.get("since", 0)))
+        return (todo[0], "dev", agent, "implement") if todo else None
+    die(f"unknown role {role}; use validator, dev or verify")
+
+
+def describe(f, what):
+    fid, t = f["id"], text(f["id"])
+    lines = [f"WORK {what} {fid}: {t.get('title', '')}", f"finding: {S}/queue/{fid}.json"]
+    v = os.path.join(S, "val", fid + ".txt")
+    if what != "validate" and os.path.exists(v):
+        lines.append(f"validation: {v}")
+    for extra in ("dispute", "refused"):
+        p = os.path.join(S, "val", f"{fid}.{extra}.txt")
+        if os.path.exists(p):
+            lines.append(f"{extra}: {p}")
+    if f.get("note"):
+        lines.append("note: " + f["note"])
+    if what == "revise":
+        lines.append(f"round {f.get('round', 1)}; your earlier change: refs/swarm/q/{fid}")
+    if what == "verify":
+        lines.append(f"merged commits on swarm-review: {' '.join(f.get('commits', [])) or f.get('sha', '?')}")
+    return "\n".join(lines)
+
+
+def cmd_next(agent, role, wait):
+    end = time.time() + min(wait, 540)
+    while True:
+        beat(agent)
+        with Locked():
+            evs = events()
+            fs = findings()
+            reap(fs, evs)
+            fs = findings()
+            got = pick(agent, role, fs, evs)
+            if got:
+                f, state, owner, what = got
+                if what == "revise":
+                    f["dev"] = agent
+                msg = {"validate": agent, "implement": agent, "revise": f"{agent} round {f.get('round', 1)}",
+                       "verify": f"{agent} verifying"}[what]
+                move(f, state, agent, msg, owner=owner)
+                print(describe(f, what))
+                return
+        if time.time() >= end:
+            break
+        time.sleep(5)
+    fs = findings()
+    if role == "verify":
+        n = sum(1 for f in fs.values() if area_of(f["id"]) == agent and f["state"] in OPEN)
+        print(f"NONE open={n}" + (" (keep waiting: your area still has open findings)" if n else " (nothing left to verify)"))
+    elif role == "validator" and verdicts(agent, fs) >= RETIRE:
+        print(f"NONE retire (you judged {RETIRE} findings; log `ev {agent} stopped - \"retired\"` and end)")
+    else:
+        st = stage()
+        end_now = st in ("done", "stopped") or (role == "dev" and flags().get("wind-down")
+                                                and not any(f["state"] in ("revise",) for f in fs.values()))
+        print("NONE stop (the swarm is finishing; end your turn)" if end_now else "NONE (nothing to claim yet; run next again)")
+
+
+def stage():
+    st = ""
+    for e in events():
+        if e["kind"] == "stage" and e["agent"] in ("supervisor", "dispatcher"):
+            st = (e["msg"].split() or [""])[0]
+    return st
+
+
+# ---- recording results ----------------------------------------------------------------------------
+
+def cmd_report(agent, fid):
+    t = text(fid)
+    if not t:
+        die(f"write {S}/queue/{fid}.json first")
+    with Locked():
+        if load(fid):
+            die(f"{fid} is already on the board; a new finding takes the next number")
+        f = {"id": fid, "area": area_of(fid), "pass": current_pass(area_of(fid)), "round": 1}
+        f.setdefault("history", []).append({"t": time.time(), "by": agent, "state": "reported", "msg": ""})
+        f.update(state="reported", owner=None, since=time.time())
+        save(f)
+    log(agent, "reported", fid, t.get("title", ""))
+
+
+def cmd_verdict(agent, fid):
+    p = os.path.join(S, "val", fid + ".txt")
+    if not os.path.exists(p):
+        die(f"write the verdict to {p} first")
+    first = open(p).readline().split()
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("validating", "reported"), None if agent in ("supervisor", "dispatcher") else agent)
+        if first[:1] == ["VALID"] and len(first) >= 3 and first[2] in RANK:
+            f["severity"] = first[2]
+            move(f, "valid", agent, first[2])
+        elif first[:1] == ["INVALID"]:
+            move(f, "invalid", agent, " ".join(first[2:]) or "rejected")
+        elif first[:1] == ["DUPLICATE"] and len(first) >= 4:
+            move(f, "duplicate", agent, "of " + first[3])
+        else:
+            die("the first line must be `VALID <id> <Critical|High|Medium|Low|Info>`, `INVALID <id>` or `DUPLICATE <id> of <id>`")
+
+
+def verdicts(agent, fs):
+    """How many findings AGENT judged."""
+    return sum(1 for f in fs.values() for h in f.get("history", [])
+               if h["by"] == agent and h["state"] in ("valid", "invalid", "duplicate"))
+
+
+def cmd_escalate(agent, new, ids):
+    if not text(new) or not os.path.exists(os.path.join(S, "val", new + ".txt")):
+        die(f"write {S}/queue/{new}.json and {S}/val/{new}.txt (first line VALID {new} <severity>) first")
+    first = open(os.path.join(S, "val", new + ".txt")).readline().split()
+    if first[:2] != ["VALID", new] or len(first) < 3 or first[2] not in RANK:
+        die(f"the first line of val/{new}.txt must be `VALID {new} <severity>`")
+    with Locked():
+        fs = [load(i) for i in ids]
+        for i, f in zip(ids, fs):
+            need(f, i, ("reported", "validating", "valid"))
+        f = {"id": new, "area": area_of(ids[0]), "pass": fs[0].get("pass", 1), "round": 1, "severity": first[2],
+             "merged_from": ids}
+        move(f, "valid", agent, first[2])
+        for i, g in zip(ids, fs):
+            move(g, "duplicate", agent, f"of {new}")
+    log(agent, "reported", new, text(new).get("title", ""))
+
+
+def cmd_submit(agent, fid, sha):
+    full = git("rev-parse", "--verify", "-q", sha + "^{commit}")
+    if not full:
+        die(f"{sha} is not a commit")
+    ok = any(e["agent"] == agent + "-reviewer" and e["kind"] == "verdict" and e["id"] == fid
+             and e["msg"].split()[:1] == ["APPROVED"] and len(e["msg"].split()) > 1
+             and len(e["msg"].split()[1]) >= 7 and full.startswith(e["msg"].split()[1]) for e in events())
+    if not ok:
+        die(f"no `verdict {fid} \"APPROVED <sha>\"` from {agent}-reviewer for {full[:9]}; "
+            "submit the commit your reviewer approved")
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("dev",), agent)
+        git("update-ref", f"refs/swarm/q/{fid}", full)
+        f.update(sha=full, dev=agent, queued_at=time.time())
+        move(f, "queued", agent, f"{agent} {full[:9]}", owner=None)
+
+
+def cmd_await(agent, fid, wait):
+    end = time.time() + min(wait, 540)
+    seen = max((i for i, e in enumerate(events()) if e["agent"] == agent and e["kind"] == "phase"
+                and e["id"] == fid and e["msg"].startswith("review-")), default=-1)
+    while True:
+        beat(agent)
+        for e in events()[seen + 1:]:
+            if e["agent"] == agent + "-reviewer" and e["kind"] == "verdict" and e["id"] == fid:
+                print("VERDICT " + e["msg"])
+                p = os.path.join(S, "verdicts", fid + ".txt")
+                if os.path.exists(p):
+                    print(open(p).read())
+                return
+        if time.time() >= end:
+            print("NONE (no verdict yet; run await again)")
+            return
+        time.sleep(5)
+
+
+def cmd_confirm(agent, fid):
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("rev",), None if agent == "supervisor" else agent)
+        move(f, "agreed", agent, f"{agent} confirmed")
+
+
+def back_to_dev(f, by, why):
+    """Send a finding back to the dev that fixed it, or end it after MAX_ROUNDS."""
+    f["round"] = f.get("round", 1) + 1
+    f["note"] = why
+    if f["round"] > MAX_ROUNDS:
+        move(f, "unresolved", by, f"after {MAX_ROUNDS} rounds: {why}")
+    else:
+        move(f, "revise", by, f"{f.get('dev') or '?'} round {f['round']}: {why}")
+
+
+def cmd_refuse(agent, fid):
+    p = os.path.join(S, "val", fid + ".refused.txt")
+    if not os.path.exists(p):
+        die(f"write why the fix does not resolve {fid}, and what must change, to {p} first")
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("rev",), agent)
+        back_to_dev(f, agent, f"{agent} not satisfied (val/{fid}.refused.txt)")
+
+
+def cmd_block(agent, fid, why):
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("dev",), agent)
+        move(f, "unresolved", agent, f"blocked by {agent}: {why}")
+
+
+def cmd_dispute(agent, fid):
+    p = os.path.join(S, "val", fid + ".dispute.txt")
+    if not os.path.exists(p):
+        die(f"write your argument against the requirements to {p} first")
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("dev",), agent)
+        f["note"] = f"{agent} disputes the requirements (val/{fid}.dispute.txt)"
+        move(f, "reported", agent, f["note"])
+
+
+def cmd_release(agent, fid):
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("validating", "dev", "rev"), agent)
+        back = {"validating": "reported", "dev": "revise" if f.get("sha") else "valid", "rev": "rev"}[f["state"]]
+        move(f, back, agent, f"released by {agent}" if back != "valid" else f.get("severity", ""), owner=None)
+
+
+# ---- passes and the supervisor's view -------------------------------------------------------------
+
+def passes():
+    """{area: [state per pass]} from the board's (or an older dispatcher's) pass events."""
+    out = {}
+    for e in events():
+        if e["kind"] == "pass" and e["agent"] in ("board", "dispatcher", "supervisor"):
+            w = e["msg"].split()
+            if len(w) >= 3 and w[1].isdigit():
+                ps = out.setdefault(w[0], [])
+                n = int(w[1])
+                while len(ps) < n:
+                    ps.append("started")
+                ps[n - 1] = " ".join(w[2:])
+    return out
+
+
+def current_pass(area):
+    return len(passes().get(area, [])) or 1
+
+
+def first_free(area):
+    nums = [int(m.group(1)) for p in glob.glob(os.path.join(S, "queue", area + "-*.json"))
+            if (m := re.search(r"-(\d+)\.json$", p))]
+    return max(nums, default=0) + 1
+
+
+def cmd_pass(area, what):
+    c = cfg()
+    ps = passes().get(area, [])
+    if what == "stop":
+        if ps and ps[-1] == "started":
+            log("board", "pass", "", f"{area} {len(ps)} stopped")
+        print(f"{area}: pass {len(ps)} stopped")
+        return
+    if ps and ps[-1] == "started":
+        die(f"{area} pass {len(ps)} is still running")
+    n = len(ps) + 1
+    tree = os.path.join(S, "base")
+    if n > 1:
+        tree = os.path.join(S, f"base-{area}-p{n}")
+        if not os.path.isdir(tree):
+            subprocess.run(["git", "-C", c["repo"], "worktree", "add", "-q", "--detach", tree, "swarm-review"], check=True)
+    if c.get("until_clean", 0) > 0:
+        log("board", "pass", "", f"{area} {n} started")
+    beat(area)
+    print(f"{area} pass {n}: TREE={tree} FIRST_N={first_free(area)}")
+
+
+def tick():
+    """Release dead claims and close passes; return the supervisor's lines."""
+    c = cfg()
+    evs = events()
+    with Locked():
+        notes = reap(findings(), evs)
+    fs = findings()
+    out = [f"note: {n}" for n in notes]
+    until = c.get("until_clean", 0)
+    fl = flags()
+    finished = 0
+    areas = [f"R{i}" for i in range(1, c["reviewers"] + 1)]
+    for a in areas:
+        ps = passes().get(a, [])
+        started = [e["t"] for e in evs if e["kind"] == "pass" and e["msg"].startswith(f"{a} {len(ps)} started")]
+        since = started[-1] if started else 0
+        done = any(e["agent"] == a and e["kind"] in ("done", "stopped") and e["t"] >= since for e in evs)
+        mine = [f for f in fs.values() if f.get("area") == a and f.get("pass", 1) == max(len(ps), 1)]
+        closed = all(f["state"] in FINAL for f in mine)
+        if until == 0:
+            if done and closed:
+                finished += 1
+            elif not any(e["agent"] == a for e in evs) and not os.path.exists(os.path.join(B, a + ".beat")):
+                out.append(f"START reviewer {a}: board pass {a} start, then start it with that TREE and FIRST_N")
+            continue
+        if not ps:
+            out.append(f"START reviewer {a}: board pass {a} start, then start it with that TREE and FIRST_N")
+            continue
+        if ps[-1] == "started" and done and closed:
+            clean = not any(h["state"] == "valid" for f in mine for h in f.get("history", []))
+            ps[-1] = "clean" if clean else "not clean"
+            log("board", "pass", "", f"{a} {len(ps)} {ps[-1]}")
+            run = 0
+            for s in reversed(ps):
+                if s != "clean":
+                    break
+                run += 1
+            if run >= until:
+                log("board", "pass", "", f"{a} {len(ps)} finished")
+                ps[-1] = "finished"
+        if ps[-1] in ("finished", "stopped"):
+            finished += 1
+        elif ps[-1] in ("clean", "not clean"):
+            if fl.get("wind-down"):
+                finished += 1
+            else:
+                out.append(f"START reviewer {a} pass {len(ps) + 1}: board pass {a} start, then a fresh agent "
+                           f"named {a} with that TREE and FIRST_N")
+        elif ps[-1] == "started" and done and not closed:
+            pass  # the reviewer waits to verify its findings
+    backlog = sum(1 for f in fs.values() if f["state"] == "reported")
+    now = time.time()
+    vals = sorted({e["agent"] for e in evs if re.fullmatch(r"V\d+", e["agent"])},
+                  key=lambda v: int(v[1:]))
+    live = [v for v in vals if not stopped(v, evs) and now - last_sign(v, evs) < LEASE]
+    want = c.get("validators", 2)
+    if backlog and len(live) < want and not fl.get("paused"):
+        nxt = max((int(v[1:]) for v in vals), default=0) + 1
+        out.append(f"START validator V{nxt} (backlog {backlog}, {len(live)} of {want} validators alive)")
+    mq = os.path.join(B, "merge-queue.beat")
+    if any(f["state"] == "queued" for f in fs.values()) and (not os.path.exists(mq) or now - os.path.getmtime(mq) > 120):
+        out.append(f"START merge queue: python3 {S}/board mergeq, in the background")
+    devs = [f"dev{i}" for i in range(1, c["devs"] + 1)]
+    work = sum(1 for f in fs.values() if f["state"] in ("valid", "revise"))
+    for d in devs:
+        if work and (stopped(d, evs) or (any(e["agent"] == d for e in evs) and now - last_sign(d, evs) > LEASE)):
+            out.append(f"QUIET {d}: no sign of life for {LEASE // 60} min with work waiting; check it, resume or replace it")
+    unres = [f["id"] for f in fs.values() if f["state"] == "unresolved"]
+    if unres:
+        out.append(f"USER unresolved (tell the user once each; board show <id>): {' '.join(unres)}")
+    cnt = {}
+    for f in fs.values():
+        cnt[f["state"]] = cnt.get(f["state"], 0) + 1
+    out.append("board: " + ", ".join(f"{k} {v}" for k, v in sorted(cnt.items())) + f" | areas finished {finished}/{len(areas)}")
+    busy = ("validating", "dev", "revise", "queued", "rev") if fl.get("wind-down") else OPEN
+    left = [f["id"] for f in fs.values() if f["state"] in ("reported", "valid")] if fl.get("wind-down") else []
+    if finished == len(areas) and not any(f["state"] in busy for f in fs.values() if f["id"][:2] != "F-"):
+        out.append("FINISHED: every area is finished and every finding in progress closed; run the final review"
+                   " (SKILL.md, Finish)" + (f"; left open by the wind-down: {' '.join(left)}" if left else ""))
+    return out
+
+
+def cmd_tick():
+    print("\n".join(tick()))
+
+
+ACT = ("START", "QUIET", "USER", "FINISHED")
+
+
+def cmd_watch():
+    """Wait until tick has something new for the supervisor to do, print it and exit (run it in the background)."""
+    p = os.path.join(B, ".watched")
+    seen = set(open(p).read().splitlines()) if os.path.exists(p) else set()
+    while True:
+        out = tick()
+        act = [l for l in out if l.startswith(ACT)]
+        if set(act) - seen:
+            open(p, "w").write("\n".join(act))
+            print("\n".join(out))
+            return
+        seen &= set(act)  # a line that went away and comes back is new again
+        time.sleep(30)
+
+
+def cmd_show(fid):
+    if fid:
+        f = load(fid) or die(f"no finding {fid}")
+        print(json.dumps({k: v for k, v in f.items() if k != "history"}, indent=1))
+        for h in f.get("history", []):
+            print(time.strftime("%H:%M:%S", time.localtime(h["t"])), h["by"], h["state"], h["msg"])
+        return
+    for f in sorted(findings().values(), key=lambda f: (f["state"] in FINAL, f.get("since", 0))):
+        print(f"{f['id']:<8} {f['state']:<10} {f.get('severity') or '-':<8} {f.get('owner') or f.get('dev') or '-':<8} "
+              f"{text(f['id']).get('title', '')[:70]}")
+
+
+def cmd_flag(name, val):
+    if name not in ("wind-down", "paused") or val not in ("on", "off"):
+        die("usage: board flag wind-down|paused on|off")
+    with Locked():
+        fl = flags()
+        fl[name] = val == "on"
+        json.dump(fl, open(os.path.join(B, ".flags.json"), "w"))
+    log("board", "note", "", f"flag {name} {val}")
+
+
+# ---- the merge queue ------------------------------------------------------------------------------
+
+def git(*a, cwd=None):
+    r = subprocess.run(["git", "-C", cwd or cfg()["repo"], *a], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def patch_id(cwd, a, b):
+    d = subprocess.run(["git", "-C", cwd, "diff", a, b], capture_output=True, text=True).stdout
+    r = subprocess.run(["git", "patch-id", "--stable"], input=d, capture_output=True, text=True).stdout
+    return r.split()[0] if r.split() else ""
+
+
+def merge_one(f, c):
+    """Rebase the approved change onto swarm-review, test that exact commit, fast-forward. Returns why not, or None."""
+    wt, fid, sha = os.path.join(S, "merge"), f["id"], f["sha"]
+    run = lambda *a: subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True)
+    run("rebase", "--abort")
+    run("reset", "-q", "--hard")
+    run("clean", "-fdq")  # not -x: ignored build output stays, so tests stay fast
+    if run("checkout", "-q", "--detach", sha).returncode:
+        return f"could not check out {sha[:9]}"
+    old = git("rev-parse", "swarm-review", cwd=wt)
+    base = git("merge-base", sha, "swarm-review", cwd=wt)
+    if run("rebase", "-q", "swarm-review").returncode:
+        files = run("diff", "--name-only", "--diff-filter=U").stdout.split()
+        run("rebase", "--abort")
+        return f"rebase conflict on swarm-review {old[:9]} in {' '.join(files) or '?'}: rebase, get it re-approved, resubmit"
+    head = git("rev-parse", "HEAD", cwd=wt)
+    if head == old:
+        return "the change is empty on swarm-review (already merged?)"
+    if patch_id(wt, base, sha) != patch_id(wt, old, head):
+        return "the rebase changed the approved change: rebase it yourself, get it re-approved, resubmit"
+    log("merge-queue", "status", fid, f"testing {fid} rebased as {head[:9]}")
+    logf = os.path.join(S, "mergeq", fid + ".log")
+    os.makedirs(os.path.dirname(logf), exist_ok=True)
+    with open(logf, "w") as out:
+        rc = subprocess.run([os.path.join(S, "tlock"), "--as", "merge-queue", "bash", "-c", c["test_cmd"]],
+                            cwd=wt, stdout=out, stderr=subprocess.STDOUT).returncode
+    if rc:
+        return f"the tests failed (rc={rc}) on the rebased change {head[:9]}; output in {logf}"
+    if git("rev-parse", "swarm-review", cwd=wt) != old:
+        return "retry"
+    ff = subprocess.run(["git", "-C", c["repo"], "merge", "-q", "--ff-only", head], capture_output=True, text=True)
+    if ff.returncode:
+        log("merge-queue", "status", fid, "fast-forward of swarm-review failed: " + ff.stderr.strip())
+        time.sleep(60)
+        return "retry"
+    f["commits"] = git("rev-list", "--reverse", f"{old}..{head}", cwd=wt).split()
+    f["sha"] = head
+    log("merge-queue", "merged", fid, head)
+    return None
+
+
+def cmd_mergeq():
+    c = cfg()
+    if not c.get("test_cmd"):
+        die("swarm.json has no test_cmd; rerun swarm-init with --test-cmd")
+    log("merge-queue", "status", "", "merge queue running")
+    while True:
+        beat("merge-queue")
+        q = sorted((f for f in findings().values() if f["state"] == "queued"), key=lambda f: f.get("queued_at", 0))
+        if not q:
+            time.sleep(10)
+            continue
+        f = q[0]
+        why = merge_one(f, c)
+        if why == "retry":
+            continue
+        with Locked():
+            g = load(f["id"])
+            if g["state"] != "queued":
+                continue
+            if why is None:
+                g.update(sha=f["sha"], commits=f["commits"], note=None)
+                move(g, "rev", "merge-queue", area_of(g["id"]), owner=None)
+            else:
+                back_to_dev(g, "merge-queue", why)
+        log("merge-queue", "idle", "", "waiting for the next approved change")
+
+
+def main(a):
+    if not a:
+        die("usage: see the top of this file")
+    c, r = a[0], a[1:]
+    wait = 0
+    if "--wait" in r:
+        i = r.index("--wait")
+        wait = int(r[i + 1])
+        r = r[:i] + r[i + 2:]
+    cmds = {"report": (2, lambda: cmd_report(*r[:2])),
+            "next": (2, lambda: cmd_next(r[0], r[1], wait)),
+            "verdict": (2, lambda: cmd_verdict(*r[:2])),
+            "escalate": (3, lambda: cmd_escalate(r[0], r[1], r[2:])),
+            "submit": (3, lambda: cmd_submit(*r[:3])),
+            "await": (2, lambda: cmd_await(r[0], r[1], wait)),
+            "confirm": (2, lambda: cmd_confirm(*r[:2])),
+            "refuse": (2, lambda: cmd_refuse(*r[:2])),
+            "block": (3, lambda: cmd_block(r[0], r[1], " ".join(r[2:]))),
+            "dispute": (2, lambda: cmd_dispute(*r[:2])),
+            "release": (2, lambda: cmd_release(*r[:2])),
+            "beat": (1, lambda: beat(r[0])),
+            "flag": (2, lambda: cmd_flag(*r[:2])),
+            "pass": (2, lambda: cmd_pass(*r[:2])),
+            "tick": (0, cmd_tick),
+            "watch": (0, cmd_watch),
+            "show": (0, lambda: cmd_show(r[0] if r else None)),
+            "mergeq": (0, cmd_mergeq)}
+    if c not in cmds or len(r) < cmds[c][0]:
+        die(f"bad command or arguments: {shlex.join(a)}; see the top of {__file__}")
+    cmds[c][1]()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

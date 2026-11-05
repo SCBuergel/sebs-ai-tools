@@ -36,9 +36,15 @@ TITLE = str(CFG.get("title") or "REVIEW SWARM")
 # Configured roster; agents seen in the log are added by roster(), so the view also works without swarm.json.
 DEVS = [f"dev{i}" for i in range(1, int(CFG.get("devs") or 0) + 1)]
 REVIEWERS = [f"R{i}" for i in range(1, int(CFG.get("reviewers") or 0) + 1)]
-AGENT_COL = {"coordinator": 75, "dispatcher": 177, "dash": 141}
+VALIDATORS = []  # V1, V2, ...: short-lived, seen in the log only (0.4; 0.3 swarms had one "coordinator")
+# Agents whose finding-state, stage, note and pass events count: the board tool and the supervisor (0.4),
+# the dispatcher in 0.3 logs.
+BOSS = ("board", "supervisor", "dispatcher")
+MQ = "merge-queue"
+AGENT_COL = {"coordinator": 75, "dispatcher": 177, "supervisor": 177, "board": 177, "dash": 141, MQ: 42}
 DEV_COL = [220, 214, 184, 178, 172, 186, 208, 222, 229, 215]
 REV_COL = [81, 117, 153, 189, 225, 219, 213, 207, 171, 135]
+VAL_COL = [75, 111, 69, 39, 105, 33]
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 PULSE = "▁▂▃▄▅▆▇█▇▆▅▄▃▂"
 
@@ -50,37 +56,71 @@ def agent_col(a):
         return DEV_COL[(int(a[3:]) - 1) % len(DEV_COL)]
     if a.startswith("R") and a[1:].isdigit():
         return REV_COL[(int(a[1:]) - 1) % len(REV_COL)]
+    if is_val(a):
+        return VAL_COL[(int(a[1:]) - 1) % len(VAL_COL)]
+    if a.startswith("dev") and a.endswith("-reviewer"):
+        return agent_col(a[:-len("-reviewer")])
     return 250
 
 
+def is_val(a):
+    return a.startswith("V") and a[1:].isdigit()
+
+
 def roster(evs):
-    """Add reviewers (R<n>) and devs (dev<n>) that appear in the log to the configured lists."""
+    """Add reviewers (R<n>), validators (V<n>) and devs (dev<n>) that appear in the log to the lists."""
     for a in {e.get("agent", "") for e in evs}:
         if a.startswith("R") and a[1:].isdigit() and a not in REVIEWERS:
             REVIEWERS.append(a)
+        if is_val(a) and a not in VALIDATORS:
+            VALIDATORS.append(a)
         if a.startswith("dev") and a[3:].isdigit() and a not in DEVS:
             DEVS.append(a)
     REVIEWERS.sort(key=lambda r: int(r[1:]))
+    VALIDATORS.sort(key=lambda v: int(v[1:]))
     DEVS.sort(key=lambda d: int(d[3:]))
-# Pipeline stages a finding moves through; index = how far it got.
-STAGES = ["reported", "validated", "dev", "coord", "agreed"]
-STATE_STAGE = {"reported": 0, "validating": 0, "valid": 1, "dev": 2, "coord": 3, "rev": 3,
-               "agreed": 4}
-STATE_LABEL = {"reported": ("waiting for coordinator", 245), "validating": ("coordinator validating", 75),
+# Pipeline stages a finding moves through; index = how far it got. coord is a 0.3 state, kept for old logs.
+STAGES = ["reported", "validated", "dev", "merge+verify", "agreed"]
+STATE_STAGE = {"reported": 0, "validating": 0, "valid": 1, "dev": 2, "revise": 2, "queued": 3, "coord": 3,
+               "rev": 3, "agreed": 4}
+STATE_LABEL = {"reported": ("waiting for a validator", 245), "validating": ("validator validating", 75),
                "valid": ("queued for dev", 177), "invalid": ("rejected", 240),
                "duplicate": ("duplicate", 240), "dev": ("dev fixing + review loop", 220),
-               "coord": ("coordinator checking fix", 75), "rev": ("reviewer checking fix", 117),
+               "revise": ("back to dev", 208), "queued": ("in merge queue", 42),
+               "coord": ("coordinator checking fix", 75), "rev": ("reviewer verifying fix", 117),
                "agreed": ("AGREED ✔", 46), "unresolved": ("UNRESOLVED ✘", 196)}
+DEV_STATES = ("dev", "revise")  # a dev holds the finding
 
 
 # Review-loop steps a dev reports with `ev devN phase <id> <step>`. A step is a DEV phase (the dev works)
-# or a REVIEW phase (the dev's commit-reviewer has the change); approved and blocked stand apart.
-PHASE_COL = {"dev": 220, "review": 39, "approved": 46, "blocked": 196}
-PHASE_TAG = {"dev": "DEV", "review": "REVIEW", "approved": "APPROVED", "blocked": "BLOCKED"}
+# or a REVIEW phase (the dev's commit-reviewer has the change); approved, queued (the approved change waits
+# in the merge queue) and blocked stand apart. 0.3 logs have "merge" (the dev fast-forwarded), a DEV phase.
+PHASE_COL = {"dev": 220, "review": 39, "approved": 46, "queued": 42, "blocked": 196}
+PHASE_TAG = {"dev": "DEV", "review": "REVIEW", "approved": "APPROVED", "queued": "QUEUED", "blocked": "BLOCKED"}
 
 
 def phase_kind(step):
-    return "review" if step.startswith("review") else step if step in ("approved", "blocked") else "dev"
+    return "review" if step.startswith("review") else step if step in ("approved", "queued", "blocked") else "dev"
+
+
+def first(msg):
+    w = str(msg or "").split()
+    return w[0] if w else ""
+
+
+def state_label(f):
+    """(label, colour) of a finding's state, naming who holds it where the event says so."""
+    lab, col = STATE_LABEL.get(f["state"], (f["state"], 245))
+    who, m = first(f.get("smsg")), str(f.get("smsg") or "")
+    if f["state"] == "validating" and is_val(who):
+        lab = f"{who} validating"
+    elif f["state"] == "rev" and re.fullmatch(r"[RV]\d+", who):  # 0.3 logs carry free text here
+        lab = f"{who} verifying fix" if "verifying" in m else f"merged, waiting for {who}"
+    elif f["state"] == "queued":
+        lab = "in merge queue" + (f" ({f['dev']})" if f.get("dev") else "")
+    elif f["state"] == "revise":
+        lab = f"back to {f.get('dev') or 'dev'}: " + m.split(":", 1)[-1].strip() if ":" in m else f"back to {f.get('dev') or 'dev'}"
+    return lab, col
 
 
 def load():
@@ -203,11 +243,11 @@ def box(title, lines, w, col):
     return out
 
 
-# Stages of the whole swarm, logged by the dispatcher with `ev dispatcher stage - "<stage> <detail>"`.
+# Stages of the whole swarm, logged by the supervisor (0.3: dispatcher) with `ev supervisor stage - "<stage> <detail>"`.
 STAGE_COL = {"setup": 245, "reviewing": 81, "paused": 208, "wind-down": 172, "final-review": 177, "final-fix": 220,
              "merge": 214, "done": 46, "stopped": 160}
 ENDED = ("done", "stopped")  # stages after which nobody works and no pass runs
-OPEN = ("reported", "validating", "valid", "dev", "coord", "rev")  # finding states that still need work
+OPEN = ("reported", "validating", "valid", "dev", "revise", "queued", "coord", "rev")  # states that still need work
 QUIET = 20 * 60  # an agent counted as working with no event of its own for this long is flagged quiet
 
 
@@ -224,7 +264,7 @@ def stage_name(msg):
 
 
 def pass_event(e, passes):
-    """Apply `ev dispatcher pass - "R9 23 started|clean|not clean|finished|stopped"` to passes[R9]."""
+    """Apply `ev board pass - "R9 23 started|clean|not clean|finished|stopped"` to passes[R9]."""
     w = e["msg"].split()
     if len(w) < 3 or not w[1].isdigit():
         return None
@@ -268,7 +308,7 @@ def state_of(evs):
             agents[owner]["seen"] = e["t"]  # a dev's commit-reviewer at work counts as the dev's activity
         if k == "test":
             continue
-        if k == "stopped":  # the dispatcher stopped the agent, or found its session gone
+        if k == "stopped":  # the agent ended, or the supervisor stopped it or found its session gone
             st.update(msg="stopped: " + e["msg"], t=e["t"], kind=k, stopped=True, busy=False)
             continue
         st["stopped"] = False
@@ -294,17 +334,27 @@ def state_of(evs):
                 steps = f.setdefault("steps", [])
                 if not steps or steps[-1] != e["msg"]:
                     steps.append(e["msg"])
-                f["dev"] = a
-            elif a == "dispatcher" and k in STATE_LABEL:
-                f["state"], f["t"] = k, e["t"]
+                f["dev"], f["pt"] = a, e["t"]
+            elif a in BOSS and k in STATE_LABEL:
+                f["state"], f["t"], f["smsg"] = k, e["t"], e["msg"]
                 f["hist"].append((e["t"], k, e["msg"]))
                 if k == "valid":
-                    f["sev"] = e["msg"].split()[0] if e["msg"] else ""
+                    f["sev"] = first(e["msg"])
+                d = first(e["msg"]).rstrip(":")
+                if k in ("dev", "revise", "queued") and d in DEVS:
+                    f["dev"] = d  # 0.4: the board names the dev that claimed it
+                    if d in agents and k != "queued":
+                        agents[d]["fid"] = i
                 if k == "dev":
                     f["round"] += 1
                     f["steps"] = []  # a new hand-off starts a new review loop
-            elif a in DEVS or a == "coordinator" or a.startswith("R"):
-                f["last"] = (a, e["msg"], e["t"])
+                elif k == "revise":
+                    m = re.search(r"\bround (\d+)", e["msg"])
+                    if m and int(m.group(1)) != f["round"]:
+                        f["round"] = int(m.group(1))
+                        f["steps"] = []  # a new round of the same dev starts a new review loop
+            elif a in DEVS or a in ("coordinator", MQ) or is_val(a) or a.startswith("R") or a.endswith("-reviewer"):
+                f["last"] = (a, e["msg"] if k != "verdict" else "verdict " + e["msg"], e["t"])
                 if a in DEVS:
                     f["dev"] = a
     return agents, focus, findings, order, notes, stage, passes
@@ -316,7 +366,7 @@ def area(r, agents, findings, passes, sname=""):
     opn = sum(f["state"] in OPEN for f in mine)
     agreed = sum(f["state"] == "agreed" for f in mine)
     st, p = agents.get(r), passes.get(r)
-    verifying = next((i for i, f in findings.items() if f["by"] == r and f["state"] == "rev"), None)
+    verifying = next((i for i, f in findings.items() if f["by"] == r and own_rev(f)), None)
     if p and p["state"] in ("finished", "stopped"):
         return f"area {p['state']} after pass {p['pass']}", 46, True, opn, agreed
     if p and sname in ENDED:
@@ -332,6 +382,21 @@ def area(r, agents, findings, passes, sname=""):
     return "", 220, False, opn, agreed
 
 
+def own_rev(f):
+    """The finding is merged and waits for its reviewer (not a validator standing in for one that is gone)."""
+    return f["state"] == "rev" and not is_val(first(f.get("smsg")))
+
+
+def claims(a, findings):
+    """Findings a validator, the coordinator or the merge queue holds now, from the board's state events."""
+    if a == MQ:
+        return [i for i, f in findings.items() if f["state"] == "queued"]
+    if a == "coordinator":
+        return [i for i, f in findings.items() if f["state"] == "coord"
+                or (f["state"] == "validating" and not is_val(first(f.get("smsg"))))]
+    return [i for i, f in findings.items() if f["state"] in ("validating", "rev") and first(f.get("smsg")) == a]
+
+
 def track(f, tick):
     stage = STATE_STAGE.get(f["state"])
     if stage is None:
@@ -341,7 +406,7 @@ def track(f, tick):
         if n < stage or f["state"] == "agreed":
             dots.append(fg(46) + "●" + R)
         elif n == stage:
-            col = PHASE_COL[phase_kind(steps_of(f)[-1])] if f["state"] == "dev" and steps_of(f) else 220
+            col = PHASE_COL[phase_kind(steps_of(f)[-1])] if f["state"] in DEV_STATES and steps_of(f) else 220
             dots.append(fg(col) + B + ("◉" if tick % 2 else "●") + R)
         else:
             dots.append(fg(238) + "○" + R)
@@ -404,7 +469,7 @@ def chain(steps, n):
 
 def agent_state(a, st, findings, sname, now, held):
     """(state, label) of an agent: working, quiet (working but no event for QUIET), waiting (a dev whose finding
-    moved on), paused, stopped or idle. The dispatcher logs `ev AGENT stopped - "<why>"` when it stops one."""
+    moved on), paused, stopped or idle. `ev AGENT stopped - "<why>"` means the agent ended."""
     if not st:
         return "idle", "not started"
     if st.get("stopped"):
@@ -414,12 +479,14 @@ def agent_state(a, st, findings, sname, now, held):
     if sname == "paused":
         return "paused", "paused with the swarm"
     if a.startswith("R") and a[1:].isdigit():
-        working = not st["done"] or any(f["by"] == a and f["state"] == "rev" for f in findings.values())
+        working = not st["done"] or any(f["by"] == a and own_rev(f) for f in findings.values())
     elif a in DEVS:
         f = findings.get(st["fid"])
-        if st["busy"] and f and f["state"] not in ("reported", "validating", "valid", "dev"):
+        if st["busy"] and f and f["state"] not in ("reported", "validating", "valid") + DEV_STATES:
             return "waiting", f"waiting for its next finding ({st['fid']} is {f['state']})"
         working = st["busy"]
+    elif is_val(a) or a == MQ:
+        working = bool(claims(a, findings))  # works while it holds a claim on the board
     else:
         working = st["busy"]
     if not working:
@@ -478,9 +545,12 @@ def render(evs, tick):
     wt = waiting(evs, mc, now)
     out.append(machine_line(mc, now) + (f"   {fg(208)}{B}{len(wt)} waiting for a slot{R}: {', '.join(wt)}" if wt else ""))
     held = {re.sub(r"^(dev\d+)-reviewer$", r"\1", str(j.get("who", ""))) for j in mc["slots"]}
-    others = sorted(a for a in {e["agent"] for e in evs} - set(DEVS) - set(REVIEWERS) - {"coordinator", "dispatcher", "dash"}
-                    if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer only logs test runs
-    roster_all = REVIEWERS + ["coordinator"] + DEVS + others
+    seen = {e["agent"] for e in evs}
+    others = sorted(a for a in seen - set(DEVS) - set(REVIEWERS) - set(VALIDATORS) - {"coordinator", MQ, "dash", *BOSS}
+                    if not (a.startswith("dev") and a.endswith("-reviewer")))  # a dev's commit-reviewer counts for the dev
+    # validators (or the 0.3 coordinator, only if the log has it), devs, the merge queue, then anyone else
+    team = (["coordinator"] if "coordinator" in seen else []) + VALIDATORS + DEVS + ([MQ] if MQ in seen else []) + others
+    roster_all = REVIEWERS + team
     states = {a: agent_state(a, agents.get(a), findings, sname, now, held) for a in roster_all}
     cnt = lambda s: [a for a in roster_all if states[a][0] == s]
     summ = (f" Agents   {fg(220)}{B}{len(cnt('working'))} working{R}"
@@ -500,7 +570,7 @@ def render(evs, tick):
         out.append(" " + bgc(col) + fg(16) + B + f" {name.upper()} " + R + f" {B}{ago(stage['t'], now)}{R}  "
                    + cut(detail, W - len(name) - 16))
     else:
-        out.append(" " + DIM + "stage not logged yet (ev dispatcher stage - \"<stage> <detail>\")" + R)
+        out.append(" " + DIM + "stage not logged yet (ev supervisor stage - \"<stage> <detail>\")" + R)
     for n in notes[-3:]:
         out.append(" " + fg(177) + "▶ " + R + IT + cut(n["msg"], W - 14) + R + DIM + f"  {ago(n['t'], now)} ago" + R)
     out.append("")
@@ -531,8 +601,11 @@ def render(evs, tick):
         left.append(f"{icon} {fg(col)}{B}{r:<3}{R} {fg(col)}{cut(focus.get(r, ''), 13):<13}{R} {flag} {ptxt}{msg}")
     left.append("")
     nw = max([11] + [len(a) for a in others])
-    for a in ["coordinator"] + DEVS + others:
+    for a in team:
         st = dict(agents.get(a, {"msg": "not started" if a in DEVS else "waiting", "t": now, "busy": False, "fid": ""}))
+        held_ids = claims(a, findings) if is_val(a) or a in ("coordinator", MQ) else []
+        if held_ids and states[a][0] in ("working", "quiet"):
+            st["fid"] = held_ids[0] + ("+" if len(held_ids) > 1 else "")
         ast, alab = states[a]
         st["busy"] = ast == "working"
         if alab:
@@ -549,12 +622,13 @@ def render(evs, tick):
     lbox = box("AGENTS", left, leftw, 99)
 
     rightw = W - leftw - 1 if W >= 130 else W
-    right = [DIM + "stages: reported─validated─dev fix+review─coordinator─agreed" + R]
+    right = [DIM + "stages: reported─validated─dev fix+review─merge+verify─agreed" + R]
     active = [i for i in order if findings[i]["state"] not in ("invalid", "duplicate")]
     for i in active:
         f = findings[i]
-        lab, col = STATE_LABEL.get(f["state"], (f["state"], 245))
-        steps = steps_of(f) if f["state"] == "dev" else []
+        lab, col = state_label(f)
+        # back with the dev (revise): its reason until the dev reports its next step
+        steps = steps_of(f) if f["state"] == "dev" or (f["state"] == "revise" and f.get("pt", 0) > f["t"]) else []
         if steps:
             k = phase_kind(steps[-1])
             lab, col = f"{f['dev']} {PHASE_TAG[k]}" + (f" {steps[-1]}" if k in ("dev", "review") else ""), PHASE_COL[k]
@@ -579,7 +653,7 @@ def render(evs, tick):
         out += lbox + rbox
 
     # Spotlight: the finding the dev is on, else the newest one in the pipeline.
-    busy = [i for i in order if findings[i]["state"] in ("dev", "coord", "rev")]
+    busy = [i for i in order if findings[i]["state"] in ("dev", "revise", "queued", "coord", "rev")]
     spot = max(busy, key=lambda i: findings[i].get("last", ("", "", 0))[2], default=None)
     spot = spot or next((i for i in reversed(order) if findings[i]["state"] in ("valid", "validating")), None)
     if spot:
@@ -590,7 +664,7 @@ def render(evs, tick):
         wrapw = W - 6
         lines.append(f"{B}{cut(q.get('title', f['title']), wrapw)}{R}")
         loc = f"{q.get('file', '')}:{q.get('line', '')}" if q.get("file") else ""
-        lines.append(f"{DIM}reported by {f['by']} · {loc} · state: {STATE_LABEL.get(f['state'], ('?',))[0]}"
+        lines.append(f"{DIM}reported by {f['by']} · {loc} · state: {state_label(f)[0]}"
                      f"{' · round ' + str(f['round']) + '/4' if f['round'] else ''}{R}")
         for label, txt, col in (("Problem", q.get("description", ""), 252),
                                 ("Exploit", q.get("failure_scenario", ""), 210),
@@ -599,7 +673,7 @@ def render(evs, tick):
                 wrapped = textwrap.wrap(" ".join(str(txt).split()), wrapw - 10)[:3 if label != "Verdict" else 1]
                 for n, wl in enumerate(wrapped):
                     lines.append((fg(col) + B + f"{label:<9}" + R if n == 0 else " " * 9) + wl)
-        if f.get("steps") or f["state"] == "dev":
+        if f.get("steps") or f["state"] in DEV_STATES:
             steps = steps_of(f)
             if steps:
                 lines.append(fg(PHASE_COL[phase_kind(steps[-1])]) + B + f"{'Loop':<9}" + R + ptag(steps[-1]) + " "
@@ -616,12 +690,14 @@ def render(evs, tick):
         a = e["agent"]
         col = agent_col(a)
         k = e["kind"]
-        kcol = {"reported": 214, "valid": 46, "invalid": 240, "agreed": 46, "unresolved": 196,
-                "note": 177, "done": 46}.get(k, 245)
+        kcol = {"reported": 214, "valid": 46, "invalid": 240, "agreed": 46, "unresolved": 196, "revise": 208,
+                "queued": 42, "merged": 42, "note": 177, "done": 46, "stopped": 196}.get(k, 245)
         if k == "phase":
             kcol = PHASE_COL[phase_kind(e["msg"])]
-        feed.append(f"{DIM}{time.strftime('%H:%M:%S', time.localtime(e['t']))}{R} {fg(col)}{a:<11}{R} "
-                    f"{fg(kcol)}{k:<10}{R} {e['id']:<6} {cut(e['msg'], W - 48)}")
+        elif k == "verdict":  # a dev's commit-reviewer: APPROVED <sha> or NOT APPROVED
+            kcol = 46 if first(e["msg"]) == "APPROVED" else 196
+        feed.append(f"{DIM}{time.strftime('%H:%M:%S', time.localtime(e['t']))}{R} {fg(col)}{cut(a, 14):<14}{R} "
+                    f"{fg(kcol)}{k:<10}{R} {e['id']:<6} {cut(e['msg'], W - 51)}")
     out += box("LIVE", feed, W, 240)
     return "\n".join(vcut(l, W) for l in out)
 

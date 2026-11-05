@@ -20,7 +20,7 @@ same name, so you install only what you want.
 | `test-gnosis-vpn` | Installs, funds and tests the latest Gnosis VPN client on a remote Linux server over SSH, or on throwaway DigitalOcean VMs that it destroys afterwards, after sending the funds back. It measures with [`gnosis_vpn-bench`](https://github.com/SCBuergel/gnosis_vpn-bench): speed and ping on one exit, a concurrent ladder, or a check of every exit. It runs commands as root on that server, changes its routes and firewall rules, and starts a watchdog on it: if the heartbeat you send over SSH stops for 6 minutes, the watchdog tears the VPN down, and after 12 minutes it reboots the server once. |
 | `report-gnosis-vpn-results` | Reports, summarizes and compares Gnosis VPN test results from `gnosis_vpn-bench` runs in a standard way: it builds the report with the bench's renderer, puts versions, network, exit, VMs and date at the top of every summary, never reports a failure as zero speed or a short check as a throughput result, and pushes only allowlisted result files to a private results repository as soon as a run has produced them, before its VMs are torn down, without asking. |
 | `review-loop` | Gets everything not pushed yet reviewed by the `commit-reviewer` agent: fixes the findings it returns, resubmits to the same reviewer so that it remembers earlier rounds, and pushes only on `APPROVED`, for at most four rounds. |
-| `review-swarm` | Makes the session the dispatcher of a swarm: reviewer agents audit one area of the repository each, a coordinator validates and rates their findings, and dev agents fix them in parallel in their own git worktrees, each fix reviewed by the dev's own `commit-reviewer`. Ships the briefs for every role, a shared event log, a test-slot lock, a guarded fast-forward that merges a fix only when tested on its HEAD and unchanged since approval, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
+| `review-swarm` | Makes the session the supervisor of a swarm that coordinates through a shared work board instead of messages: reviewer agents audit one area of the repository each, short-lived validators judge and rate their findings, and dev agents fix them in parallel in their own git worktrees, each fix approved by the dev's own `commit-reviewer` and merged by a merge queue that tests the exact rebased commit. Claims are leases, so a stalled agent's work goes to another. Ships the briefs for every role, the board, a test-slot lock, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
 
 | Agent | What it does |
 | --- | --- |
@@ -102,42 +102,44 @@ The `review-swarm` skill scales a review across many agents. Install it
 together with `review-loop` and `commit-reviewer`, which its devs use. In a
 session at the repository, on a clean checkout of the branch to review, ask
 for it: "run a review swarm for the security of this repository", or
-`/review-swarm:review-swarm`. That session becomes the dispatcher. It:
+`/review-swarm:review-swarm`. That session becomes the supervisor. It:
 
 1. sizes the swarm from the machine's CPUs and memory (the limit is how many
    test runs go at once), splits the task into areas, and runs `swarm-init`,
-   which creates a swarm folder with the tools and the protocol, branch `swarm-review`, a
-   read-only worktree of the starting point, and one worktree per dev;
-2. starts the web dashboard and posts its link, then the reviewers
-   (read-only, one area each) and the coordinator
-   (read-only; validates each finding against the code, rates it, and later
-   checks each fix), then the devs;
-3. passes messages between them and records every state change in the swarm
-   folder's log, without judging a finding itself. Each dev fixes one finding
-   at a time in its worktree, runs `review-loop` on it, and on `APPROVED`
-   fast-forwards `swarm-review`; nobody pushes. Once an area's findings are
-   all closed, a fresh reviewer with the same brief and no memory of the
-   earlier passes reviews it again, until 2 passes in a row find nothing
-   worth fixing; ask for a single pass for a quicker check;
-4. when every finding is agreed, has the whole range reviewed once more by one
+   which creates a swarm folder with the tools, the protocol and a rules file,
+   branch `swarm-review`, a read-only worktree of the starting point, a
+   worktree for the merge queue, and one worktree per dev;
+2. starts the web dashboard and posts its link, starts the merge queue, then
+   the reviewers (read-only, one area each), the validators and the devs;
+3. supervises without relaying anything. Every finding is a card on a shared
+   work board, and each agent claims the next card for its role: validators
+   judge and rate reported findings against the code and the rules file;
+   devs fix valid ones in their worktrees and run `review-loop` on each fix;
+   the merge queue rebases each approved fix onto `swarm-review`, tests that
+   exact commit and fast-forwards; and the reviewer who reported the finding
+   confirms the merged fix, or sends it back. A claim whose agent shows no
+   sign of life for 15 minutes goes to another agent. The supervisor records
+   your decisions in the rules file, starts the next review pass of an area
+   when the board asks for it (a fresh reviewer with no memory of earlier
+   passes, until 2 passes in a row find nothing worth fixing; ask for a
+   single pass for a quicker check), and replaces stopped agents;
+4. when every area is finished, has the whole range reviewed once more by one
    `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
    your rules allow, and cleans the worktrees up.
 
-You watch it live. In a terminal, `python3 $SW/dash.py` shows the swarm's mode
-(one pass, or repeated passes until K clean) and current stage (reviewing,
-final review, merge, ...) with the dispatcher's latest notes, the agents with
-each area's open and agreed findings, the findings pipeline (reported,
-validated, dev, coordinator, agreed), each dev's review-loop step, machine
-memory and load with who holds each test slot, and the event feed; `python3
-$SW/dashweb.py` serves the same as a web page on http://127.0.0.1:8765/ with
-expandable findings, tooltips, and an activity timeline of which agents work
-when, their test runs and their waits for a test slot; the dispatcher starts
-it and posts the link before the first agent starts. `$SW` is the swarm folder
-the session names. You can also talk to any agent directly, for example to ask
-the optional `dash` agent for a change to the dashboards.
+You watch it live. In a terminal, `python3 $SW/dash.py` shows the swarm's
+stage with the supervisor's latest notes, the agents with each area's open and
+agreed findings, the findings pipeline (reported, validated, dev, merge and
+verify, agreed), each dev's review-loop step, machine memory and load with who
+holds each test slot, and the event feed; `python3 $SW/dashweb.py` serves the
+same as a web page on http://127.0.0.1:8765/ with expandable findings and an
+activity timeline. `$SW/board show` prints the board. `$SW` is the swarm
+folder the session names. You can also talk to any agent directly, for
+example to ask the optional `dash` agent for a change to the dashboards.
 
-The swarm is file-based: if the dispatcher session ends, a new session can
-take over from the folder, as the skill describes.
+The swarm is file-based: the agents keep working on the board if the
+supervisor session ends, and a new session can take over from the folder, as
+the skill describes.
 
 ## Update or remove a plugin
 
@@ -164,7 +166,7 @@ claude plugin marketplace remove sebs-ai-tools
 ```text
 .claude-plugin/marketplace.json    the marketplace: one plugin entry per skill or agent
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
-                                   (review-swarm: roles/ briefs, tools/ scripts)
+                                   (review-swarm: roles/ briefs, tools/ scripts, rules.md)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
 evals/<skill-name>/<case>/         optional test cases for a skill
