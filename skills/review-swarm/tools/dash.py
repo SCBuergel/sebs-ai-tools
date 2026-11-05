@@ -636,7 +636,7 @@ def render(evs, tick):
             lab, col = f["dev"] + " fixing", agent_col(f["dev"])
         sev = f["sev"] or "?"
         sv = bgc(SEV.get(sev, 238)) + fg(16) + B + f"{sev[:4]:^4}" + R
-        rnd = f" r{f['round']}/4" if f["round"] else "     "
+        rnd = f" r{f['round']:<2}" if f["round"] else "    "
         right.append(f"{sv} {B}{i:<6}{R} {track(f, tick)} {fg(col)}{cut(lab, 24):<24}{R}{rnd}")
         right.append(f"      {DIM}{cut(f['title'], rightw - 12)}{R}")
     gone = [i for i in order if findings[i]["state"] in ("invalid", "duplicate")]
@@ -665,7 +665,7 @@ def render(evs, tick):
         lines.append(f"{B}{cut(q.get('title', f['title']), wrapw)}{R}")
         loc = f"{q.get('file', '')}:{q.get('line', '')}" if q.get("file") else ""
         lines.append(f"{DIM}reported by {f['by']} · {loc} · state: {state_label(f)[0]}"
-                     f"{' · round ' + str(f['round']) + '/4' if f['round'] else ''}{R}")
+                     f"{' · round ' + str(f['round']) if f['round'] else ''}{R}")
         for label, txt, col in (("Problem", q.get("description", ""), 252),
                                 ("Exploit", q.get("failure_scenario", ""), 210),
                                 ("Verdict", " ".join(v.split("\n")[0:1]), 75)):

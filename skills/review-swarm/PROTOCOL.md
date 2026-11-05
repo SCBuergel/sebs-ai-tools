@@ -22,8 +22,8 @@ says `stop` or `retire`. The agent writes its result back with the board command
 change is logged to `$SW/events.jsonl`, which the dashboards show. `$SW/board show [<id>]` prints the
 board or one card's history.
 
-A claim is a lease. It stays yours while you show signs of life: an `ev` event, a test run, your
-commit-reviewer's events, or any `board` call. After 15 minutes without one, the board gives the card
+A claim is a lease. It stays yours while you show signs of life: an `ev` event, a test run or a wait for a
+test slot, your commit-reviewer's events or test runs, or any `board` call. After 15 minutes without one, the board gives the card
 to someone else, and your next board command about it is refused: drop it and run `next`.
 
 ## Roles
@@ -43,8 +43,9 @@ to someone else, and your next board command about it is refused: drop it and ru
   and does not pass messages between agents.
 
 Two gates approve a fix: the dev's commit-reviewer, before it enters the queue, and the reviewer who
-reported the finding (or a validator in its place), after it is merged. Three refusals in a row make the
-finding unresolved; the supervisor tells the user.
+reported the finding (or a validator in its place), after it is merged. The verifier's third refusal of a
+finding's fix makes it unresolved; the supervisor tells the user. Returns from the merge queue (a conflict
+or failing tests) do not count toward that.
 
 ## Trees
 - $SW/base: a detached worktree of {{SOURCE}} as it was when the swarm started. First-pass reviewers read

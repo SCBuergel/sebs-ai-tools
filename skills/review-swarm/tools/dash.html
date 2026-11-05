@@ -315,7 +315,7 @@ section > header h2 { white-space: nowrap; }
       <div class="tiles" id="tiles"></div>
       <div class="progress">
         <div class="bar" id="bar" data-tip="<b>Progress</b><br>Validated findings by outcome. Green = agreed and merged into swarm-review, violet = still in the pipeline, red = unresolved."></div>
-        <div class="legend"><span data-tip="<b>Agreed</b><br>Fixed, approved by the dev's commit-reviewer, merged into swarm-review by the merge queue, and confirmed by the reporting reviewer (or a validator standing in for it)."><i style="background:var(--good)"></i>agreed</span><span data-tip="<b>In pipeline</b><br>Validated but not agreed yet: queued for a dev, being fixed, or being checked."><i style="background:var(--violet);opacity:.75"></i>in pipeline</span><span data-tip="<b>Unresolved</b><br>No agreement after 4 rounds, or the dev and the verifier disagree. Needs the user."><i style="background:var(--critical)"></i>unresolved</span><span data-tip="<b>Total</b><br>Agreed findings out of all validated ones. Rejected and duplicate findings do not count."><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
+        <div class="legend"><span data-tip="<b>Agreed</b><br>Fixed, approved by the dev's commit-reviewer, merged into swarm-review by the merge queue, and confirmed by the reporting reviewer (or a validator standing in for it)."><i style="background:var(--good)"></i>agreed</span><span data-tip="<b>In pipeline</b><br>Validated but not agreed yet: queued for a dev, being fixed, or being checked."><i style="background:var(--violet);opacity:.75"></i>in pipeline</span><span data-tip="<b>Unresolved</b><br>The verifier refused the fix three times, or the dev found no fix path. Needs the user."><i style="background:var(--critical)"></i>unresolved</span><span data-tip="<b>Total</b><br>Agreed findings out of all validated ones. Rejected and duplicate findings do not count."><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
       </div>
       <div class="chips" id="chips"></div>
     </div>
@@ -378,7 +378,7 @@ section > header h2 { white-space: nowrap; }
           <th data-tip="<b>Id</b><br>Reviewer name and a running number, e.g. R10-1 is the first finding of reviewer R10. F-1, F-2, … come from the final review of all fixes together, before the push.">Id</th>
           <th data-tip="<b>Stage track</b><br>Five dots: reported → validated → dev (fix and commit review) → merge+verify (merge queue, then the reporting reviewer) → agreed. Green are passed, the yellow one is where the finding is now.">Stage</th>
           <th data-tip="<b>State</b><br>What is happening to the finding right now and who holds it, as recorded by the board.">State</th>
-          <th data-tip="<b>Round</b><br>How many rounds a dev has had on this finding (a revise from the board starts the next). After 4 rounds without agreement it becomes unresolved.">Round</th>
+          <th data-tip="<b>Round</b><br>How many rounds a dev has had on this finding (a revise from the board starts the next).">Round</th>
           <th data-tip="<b>Title</b><br>The reviewer's one-line summary. While a dev works on it, the review-loop steps of this round show underneath.">Title</th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -444,7 +444,7 @@ const STATE = {
   coord:      ['coordinator checking fix', 'The fix is merged into swarm-review; the coordinator checks it meets the validation (0.3 swarms).'],
   rev:        ['reviewer verifying fix', 'Merged into swarm-review; the reporting reviewer (or a validator standing in for one that is gone) verifies the fix.'],
   agreed:     ['AGREED ✔', 'Fix approved, merged and confirmed by the reviewer. Done.'],
-  unresolved: ['UNRESOLVED ✘', 'Gave up after 4 rounds, or the dev and the verifier disagree; needs the user.'],
+  unresolved: ['UNRESOLVED ✘', 'Refused by the verifier three times, or blocked by its dev; needs the user.'],
 };
 const DEV_STATES = ['dev', 'revise'];  // a dev holds the finding
 // The agents whose finding-state, stage, note and pass events count: the board tool and the supervisor (0.4),
@@ -1014,7 +1014,7 @@ function render() {
     tile('Agreed', done, 'The dev\'s fix passed its own commit-reviewer loop, the merge queue merged it into swarm-review, and the reporting reviewer (or a validator) confirmed it.', 'var(--good)') +
     tile('In pipeline', pipe, 'Validated findings not yet agreed: queued for a dev, being fixed, in the merge queue, or being verified.', 'var(--violet)') +
     tile('Rejected', rej, 'A validator judged the finding invalid or a duplicate; nothing to fix.', 'var(--ink-3)') +
-    tile('Unresolved', unres, 'Fix failed after 4 dev rounds, or the dev and the verifier disagree. Needs the user.', 'var(--critical)') +
+    tile('Unresolved', unres, 'Refused by the verifier three times, or blocked by its dev. Needs the user.', 'var(--critical)') +
     tile('Devs busy', devbusy, `How many of the ${DEVS.length} devs are working on a finding now: not idle, not waiting for their next finding, and not quiet for ${QUIET / 60} minutes.`, 'var(--yellow)', '/ ' + DEVS.length);
   const pct = n => valid.length ? (100*n/valid.length)+'%' : '0%';
   $('bar').innerHTML = `<i class="agreed" style="width:${pct(done)}"></i><i class="pipe" style="width:${pct(pipe)}"></i><i class="unres" style="width:${pct(unres)}"></i>`;
@@ -1064,7 +1064,7 @@ function render() {
     return `<tr class="prow${open ? ' open' : ''}${flash.id === i && Date.now() < flash.until ? ' flash' : ''}" data-id="${esc(i)}" data-tip="<b>${tesc(i)}</b> — ${tesc(lab)}<br>${tesc(ltip)}<br><span class='muted'>click to ${open ? 'close' : 'open'} the full finding</span>">
       <td><span class="sev" data-tip="<b>${tesc(sev)}</b><br>${f.sev ? 'A validator rated this finding ' + tesc(sev) + ' when it validated it (scale in severity.md).' : 'Not validated yet: no validator has rated it.'}"><span class="dot" style="background:${SEV[sev] || 'var(--line-2)'}"></span>${esc(sev)}</span></td>
       <td class="id">${esc(i)}</td><td>${track(f)}</td><td class="lab">${label}</td>
-      <td class="round">${f.round ? `<span data-tip="<b>Round ${f.round} of 4</b><br>Handed to a dev ${f.round} time${f.round === 1 ? '' : 's'}. After 4 rounds without agreement the finding becomes unresolved.">r${f.round}/4</span>` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
+      <td class="round">${f.round ? `<span data-tip="<b>Round ${f.round}</b><br>Handed to a dev ${f.round} time${f.round === 1 ? '' : 's'}.">r${f.round}</span>` : ''}</td><td class="title">${esc(f.title)}${steps.length ? chain(steps) : ''}</td></tr>` + (open ? detail(i, f) : '');
   }).join('') || `<tr><td colspan="6" class="empty" data-tip="<b>No findings yet</b><br>Reviewers announce findings with a reported event; each shows up here at once.">awaiting first finding…</td></tr>`;
   $('pipebadge').textContent = `${active.length} active · ${done} agreed`;
   const gone = order.filter(i => ['invalid','duplicate'].includes(findings[i].state));

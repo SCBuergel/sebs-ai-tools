@@ -181,8 +181,8 @@ tick` yourself.
   <id>`. The board itself logs when a pass is clean, not clean or finished.
 - `START validator V<k>`: findings wait and fewer validators than configured
   are alive. Start one with that name.
-- `START merge queue`: changes wait and the merge queue is not running. Start
-  it again as in section 4.
+- `START merge queue`: changes wait and no merge queue is running. Start it
+  again as in section 4; a second one refuses to start while one runs.
 - `QUIET devN`: a dev with work waiting shows no sign of life. Check it with
   `$SW/lastmsg <agent id>`; resume it with SendMessage, or log `$SW/ev devN
   stopped - "<why>"` and start a replacement with the same brief. Its claims

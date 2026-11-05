@@ -8,7 +8,8 @@
 # Every agent starts every test run through this, so at most that many runs share the machine.
 # It logs each run as `test` events for the dashboards' activity view: "wait" when no slot is free,
 # "start slot=N CMD", "end slot=N rc=RC took=Ss head=SHA", or "gave up waiting" when it is stopped before a
-# slot. head is the commit the run tested (with "+dirty" for uncommitted changes); ffmerge checks it.
+# slot. head is the commit the run tested (with "+dirty" for uncommitted changes). While it waits it touches
+# state/NAME.beat, so the board counts the wait as a sign of life.
 set -u
 S=$(dirname "$(realpath "$0")")
 MEM=${SWARM_TEST_MEM:-2G}
@@ -55,5 +56,6 @@ while :; do
 		exec {fd}>&-
 	done
 	if [ -z "$waiting" ]; then waiting=1; ev wait; trap 'ev gave up waiting' EXIT; fi
+	[ ! -d "$S/state" ] || touch "$S/state/$AS.beat" 2>/dev/null
 	sleep 3
 done

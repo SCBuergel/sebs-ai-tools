@@ -12,7 +12,8 @@ dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, 
   board report AGENT ID              reviewer: queue/ID.json is written; ID enters the board
   board next AGENT ROLE [--wait S]   claim the next piece of work: ROLE validator, dev or verify
   board verdict AGENT ID             validator: val/ID.txt is written (VALID ID SEV, INVALID ID, DUPLICATE ID of X)
-  board escalate AGENT NEW ID...     validator: one design finding NEW (<area>-D<n>) replaces the IDs; write
+  board newid AREA                   validator: reserve and print a free design-finding id AREA-D<n>
+  board escalate AGENT NEW ID...     validator: the design finding NEW replaces the IDs; write
                                      queue/NEW.json and val/NEW.txt first
   board submit AGENT ID SHA          dev: the change at SHA was APPROVED by AGENT-reviewer; into the merge queue
   board await AGENT ID [--wait S]    dev: wait for AGENT-reviewer's verdict on ID; prints it
@@ -38,7 +39,7 @@ S = os.path.dirname(os.path.abspath(__file__))
 B = os.path.join(S, "state")
 LEASE = 900           # a claim without a sign of life for 15 min is released
 ORPHAN_VERIFY = 1200  # a merged fix nobody verified for 20 min may be verified by a validator
-MAX_ROUNDS = 3        # a finding back with its dev more often than this is unresolved
+MAX_REFUSALS = 3      # the verifier's third refusal of a fix makes the finding unresolved
 RETIRE = 8            # a validator ends after this many verdicts, so its context stays small
 RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
 FINAL = ("agreed", "invalid", "duplicate", "unresolved")
@@ -111,10 +112,21 @@ def beat(agent):
 
 
 def last_sign(agent, evs):
-    """When AGENT last showed it is alive: its events, its commit-reviewer's, its test runs, its board calls."""
-    t = max((e["t"] for e in evs if e["agent"] in (agent, agent + "-reviewer")), default=0)
-    p = os.path.join(B, agent + ".beat")
-    return max(t, os.path.getmtime(p) if os.path.exists(p) else 0)
+    """When AGENT last showed it is alive: its or its commit-reviewer's events, board calls and test runs
+    (tlock beats while it waits for a slot; a held slot counts as now)."""
+    who = (agent, agent + "-reviewer")
+    t = max((e["t"] for e in evs if e["agent"] in who), default=0)
+    for a in who:
+        p = os.path.join(B, a + ".beat")
+        if os.path.exists(p):
+            t = max(t, os.path.getmtime(p))
+    for p in glob.glob(os.path.join(S, "slots", "*.json")):
+        try:
+            if json.load(open(p)).get("agent") in who:
+                t = time.time()
+        except (ValueError, OSError):
+            pass
+    return t
 
 
 def stopped(agent, evs):
@@ -289,6 +301,8 @@ def cmd_verdict(agent, fid):
     if not os.path.exists(p):
         die(f"write the verdict to {p} first")
     first = open(p).readline().split()
+    if first[1:2] != [fid]:
+        die(f"the first line of {p} must name {fid}")
     with Locked():
         f = load(fid)
         need(f, fid, ("validating", "reported"), None if agent in ("supervisor", "dispatcher") else agent)
@@ -310,6 +324,8 @@ def verdicts(agent, fs):
 
 
 def cmd_escalate(agent, new, ids):
+    if load(new):
+        die(f"{new} is already on the board; get a free id with `board newid <area>`")
     if not text(new) or not os.path.exists(os.path.join(S, "val", new + ".txt")):
         die(f"write {S}/queue/{new}.json and {S}/val/{new}.txt (first line VALID {new} <severity>) first")
     first = open(os.path.join(S, "val", new + ".txt")).readline().split()
@@ -325,6 +341,19 @@ def cmd_escalate(agent, new, ids):
         for i, g in zip(ids, fs):
             move(g, "duplicate", agent, f"of {new}")
     log(agent, "reported", new, text(new).get("title", ""))
+
+
+def cmd_newid(area):
+    """Reserve and print the next free design-finding id <area>-D<n>."""
+    os.makedirs(B, exist_ok=True)
+    n = 1
+    while True:
+        try:
+            os.close(os.open(os.path.join(B, f".reserved-{area}-D{n}"), os.O_CREAT | os.O_EXCL))
+            print(f"{area}-D{n}")
+            return
+        except FileExistsError:
+            n += 1
 
 
 def cmd_submit(agent, fid, sha):
@@ -371,12 +400,13 @@ def cmd_confirm(agent, fid):
         move(f, "agreed", agent, f"{agent} confirmed")
 
 
-def back_to_dev(f, by, why):
-    """Send a finding back to the dev that fixed it, or end it after MAX_ROUNDS."""
+def back_to_dev(f, by, why, refused=False):
+    """Send a finding back to the dev that fixed it; the verifier's third refusal ends it instead."""
     f["round"] = f.get("round", 1) + 1
     f["note"] = why
-    if f["round"] > MAX_ROUNDS:
-        move(f, "unresolved", by, f"after {MAX_ROUNDS} rounds: {why}")
+    f["refusals"] = f.get("refusals", 0) + refused
+    if f["refusals"] >= MAX_REFUSALS:
+        move(f, "unresolved", by, f"refused {MAX_REFUSALS} times: {why}")
     else:
         move(f, "revise", by, f"{f.get('dev') or '?'} round {f['round']}: {why}")
 
@@ -388,7 +418,7 @@ def cmd_refuse(agent, fid):
     with Locked():
         f = load(fid)
         need(f, fid, ("rev",), agent)
-        back_to_dev(f, agent, f"{agent} not satisfied (val/{fid}.refused.txt)")
+        back_to_dev(f, agent, f"{agent} not satisfied (val/{fid}.refused.txt)", refused=True)
 
 
 def cmd_block(agent, fid, why):
@@ -525,8 +555,7 @@ def tick():
     if backlog and len(live) < want and not fl.get("paused"):
         nxt = max((int(v[1:]) for v in vals), default=0) + 1
         out.append(f"START validator V{nxt} (backlog {backlog}, {len(live)} of {want} validators alive)")
-    mq = os.path.join(B, "merge-queue.beat")
-    if any(f["state"] == "queued" for f in fs.values()) and (not os.path.exists(mq) or now - os.path.getmtime(mq) > 120):
+    if any(f["state"] == "queued" for f in fs.values()) and not mergeq_running():
         out.append(f"START merge queue: python3 {S}/board mergeq, in the background")
     devs = [f"dev{i}" for i in range(1, c["devs"] + 1)]
     work = sum(1 for f in fs.values() if f["state"] in ("valid", "revise"))
@@ -561,7 +590,7 @@ def cmd_watch():
     seen = set(open(p).read().splitlines()) if os.path.exists(p) else set()
     while True:
         out = tick()
-        act = [l for l in out if l.startswith(ACT)]
+        act = [re.sub(r" \(backlog .*\)$", "", l) for l in out if l.startswith(ACT)]
         if set(act) - seen:
             open(p, "w").write("\n".join(act))
             print("\n".join(out))
@@ -629,8 +658,12 @@ def merge_one(f, c):
     logf = os.path.join(S, "mergeq", fid + ".log")
     os.makedirs(os.path.dirname(logf), exist_ok=True)
     with open(logf, "w") as out:
-        rc = subprocess.run([os.path.join(S, "tlock"), "--as", "merge-queue", "bash", "-c", c["test_cmd"]],
-                            cwd=wt, stdout=out, stderr=subprocess.STDOUT).returncode
+        p = subprocess.Popen([os.path.join(S, "tlock"), "--as", "merge-queue", "bash", "-c", c["test_cmd"]],
+                             cwd=wt, stdout=out, stderr=subprocess.STDOUT)
+        while p.poll() is None:  # waiting for a slot or testing is a sign of life
+            beat("merge-queue")
+            time.sleep(10)
+        rc = p.returncode
     if rc:
         return f"the tests failed (rc={rc}) on the rebased change {head[:9]}; output in {logf}"
     if git("rev-parse", "swarm-review", cwd=wt) != old:
@@ -646,10 +679,26 @@ def merge_one(f, c):
     return None
 
 
+def mergeq_running():
+    """Whether a merge queue holds its lock now."""
+    os.makedirs(B, exist_ok=True)
+    with open(os.path.join(B, ".mergeq.lock"), "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+    return False
+
+
 def cmd_mergeq():
     c = cfg()
     if not c.get("test_cmd"):
         die("swarm.json has no test_cmd; rerun swarm-init with --test-cmd")
+    lock = open(os.path.join(B, ".mergeq.lock"), "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # held until the process ends
+    except OSError:
+        die("another merge queue is running; there must be only one")
     log("merge-queue", "status", "", "merge queue running")
     while True:
         beat("merge-queue")
@@ -687,6 +736,7 @@ def main(a):
             "verdict": (2, lambda: cmd_verdict(*r[:2])),
             "escalate": (3, lambda: cmd_escalate(r[0], r[1], r[2:])),
             "submit": (3, lambda: cmd_submit(*r[:3])),
+            "newid": (1, lambda: cmd_newid(r[0])),
             "await": (2, lambda: cmd_await(r[0], r[1], wait)),
             "confirm": (2, lambda: cmd_confirm(*r[:2])),
             "refuse": (2, lambda: cmd_refuse(*r[:2])),
