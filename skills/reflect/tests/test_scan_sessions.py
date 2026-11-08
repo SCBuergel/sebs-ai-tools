@@ -522,3 +522,15 @@ def test_cost_is_ranked_per_round(tmp_path):
     assert by_id["lead"]["tool_uses"] == 16 and by_id["lead"]["duration_ms"] == 800
     cost = [m["excerpt"] for m in run["moments"] if m["kind"] == "cost"]
     assert len(cost) == 1 and "hog" in cost[0]
+
+
+def test_a_tool_call_logged_twice_counts_once(tmp_path):
+    call = {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "make"}}
+    rows = [user_text("task"),
+            {"type": "assistant", "message": {"id": "m1", "content": [call]}},
+            tool_result("ok"),
+            # the same message logged again, without its message id
+            {"type": "assistant", "message": {"content": [call]}},
+            {"type": "api-request-blob", "message": {"content": [call]}}]
+    r = scan.score_session(write(tmp_path, rows))
+    assert (r["signals"]["tool_calls"], r["signals"]["cmd_repeats"]) == (1, 0)

@@ -261,8 +261,10 @@ def notification(text):
 
 
 def score_session(path, moments_override=None, seen_uuids=None):
-    """Signals and moments of one transcript. seen_uuids: entries an earlier member of the
-    run already counted (a continuation repeats its parent's turns); updated in place."""
+    """Signals and moments of one transcript. seen_uuids: entries and tool calls an earlier
+    member of the run already counted (a continuation repeats its parent's turns); updated in
+    place."""
+    seen = seen_uuids if seen_uuids is not None else set()
     reads = {}       # revisit target (file / search / page) -> [count, first_line]
     cmds = {}        # command -> [count, first_line]
     tool_total = 0
@@ -345,6 +347,11 @@ def score_session(path, moments_override=None, seen_uuids=None):
                     for b in content:
                         if not isinstance(b, dict) or b.get("type") != "tool_use":
                             continue
+                        # A call logged again (another entry, same tool_use id) is one call.
+                        if b.get("id"):
+                            if "tool:" + b["id"] in seen:
+                                continue
+                            seen.add("tool:" + b["id"])
                         tool_total += 1
                         name = b.get("name")
                         inp = b.get("input", {}) or {}
