@@ -35,7 +35,7 @@ Roles, each a subagent started with the Agent tool from the briefs under
   test command on that exact commit, and fast-forwards. A conflict, a failed
   test or a rebase that changed the code sends the card back to its dev; a
   conflict, or a difference, only in import lines it resolves itself, and the
-  approval stands. A
+  approval stands, unless both sides import one name from different places. A
   failed run is repeated once: tests that fail and then pass send it back as
   `FLAKY`, to be fixed rather than merged.
 - **Dash** (optional): maintains the dashboards on the user's requests. The
@@ -72,9 +72,10 @@ tear down.
   `$SW` filled in: `Bash(<SW>/tlock:*)`, `Bash(<SW>/board:*)`,
   `Bash(<SW>/ev:*)`, `Bash(python3 <SW>/board:*)`, and, for the
   commit-reviewers' test worktrees under the swarm folder only,
-  `Bash(git worktree add <SW>/:*)` and `Bash(git worktree remove <SW>/:*)`. Show them to the user, who can add them
-  with `/permissions` or to the project's `.claude/settings.local.json`.
-  Never edit the user's settings yourself.
+  `Bash(git worktree add <SW>/:*)` and `Bash(git worktree remove <SW>/:*)`.
+  Show them to the user, who can add them with `/permissions` or to the
+  project's `.claude/settings.local.json`. Never edit the user's settings
+  yourself.
 
 ## 2. Size the swarm
 

@@ -142,7 +142,7 @@ def test_the_import_sorter_runs_after_a_resolution_and_must_pass(tmp_path, monke
     board = load_board(sw)
     why = board.merge_one({"id": "R1-1", "sha": sha}, board.cfg())
     if expect:
-        assert why is None and (sw / "merge" / "src" / "m.py").read_text() == expect
+        assert why is None and git("show", "HEAD:src/m.py", cwd=sw / "merge") + "\n" == expect
     else:
         assert why.startswith("the import sorter failed (rc=1)")
 
@@ -174,6 +174,31 @@ def test_any_other_conflict_goes_back(tmp_path, monkeypatch):
     board = load_board(sw)
     why = board.merge_one({"id": "R1-1", "sha": sha}, board.cfg())
     assert why.startswith("rebase conflict") and "src/m.py" in why
+
+
+@pytest.mark.parametrize("ours,theirs,clash", [
+    ("from x import a, b, d", "from x import a, b, c", False),
+    ("import a.b", "import a.c", False),
+    ("import { a } from 'm';", "import { a, b } from 'm';", False),
+    ("from c import f", "from b import f", True),
+    ("from x import f as g", "from x import h as g", True),
+    ("import a.b as c", "import a.d as c", True),
+])
+def test_only_a_name_bound_to_something_else_clashes(ours, theirs, clash):
+    assert load_board_module().clashes([ours], [theirs]) is clash
+
+
+def test_two_names_added_to_one_import_line_merge(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    repo, sw = init_swarm(tmp_path, "true")
+    (repo / "src" / "m.py").write_text("from x import a, b\nX = 1\n")
+    git("commit", "-qam", "base", cwd=repo)
+    git("checkout", "-q", "-B", "swarm-dev1", "swarm-review", cwd=sw / "dev1")
+    sha = set_line(sw, "src/m.py", "from x import a, b, c\nX = 1\n", "[R1-1] c")
+    advance_review(repo, "from x import a, b, d\nX = 1\n")
+    board = load_board(sw)
+    assert board.merge_one({"id": "R1-1", "sha": sha}, board.cfg()) is None
+    assert git("show", "HEAD:src/m.py", cwd=sw / "merge") == "from x import a, b, d\nfrom x import a, b, c\nX = 1"
 
 
 def test_import_lines_are_recognised():

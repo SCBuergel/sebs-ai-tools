@@ -667,20 +667,30 @@ def only_imports(lines):
 
 
 def bound_names(line):
-    """{name: the import line binding it} for one import line."""
+    """{name: what it is bound to} for one import line: (module, imported name)."""
     line = line.strip().rstrip(";")
+    out = {}
     if line.startswith("from "):
-        parts = line.split(" import ", 1)[1].split(",")
+        module, names = line[len("from "):].split(" import ", 1)
+        for p in names.split(","):
+            orig, _, alias = p.strip().partition(" as ")
+            out[(alias or orig).strip()] = (module.strip(), orig.strip())
     elif line.startswith("import ") and " from " in line:  # JS/TS
-        parts = re.findall(r"(\w+(?:\s+as\s+\w+)?)", line.split(" from ", 1)[0][len("import "):])
+        names, module = line[len("import "):].rsplit(" from ", 1)
+        for orig, alias in re.findall(r"(\w+)(?:\s+as\s+(\w+))?", names):
+            out[alias or orig] = (module.strip("'\" "), orig)
     else:
-        parts = [p if " as " in p else p.strip().split(".")[0] for p in line[len("import "):].split(",")]
-    names = {p.split(" as ")[-1].strip() for p in parts} - {"*", "type", ""}
-    return {n: line for n in names}
+        for p in line[len("import "):].split(","):
+            orig, _, alias = p.strip().partition(" as ")
+            # import a.b binds a to module a; import a.b as c binds c to a.b
+            out[alias.strip() or orig.split(".")[0]] = (orig.strip() if alias else orig.split(".")[0], None)
+    out.pop("*", None)
+    out.pop("type", None)
+    return out
 
 
 def clashes(ours, theirs):
-    """A name both sides import from different places: keeping both lines would silently rebind it."""
+    """A name both sides bind to different things: keeping both lines would silently rebind it."""
     a, b = {}, {}
     for l in ours:
         a.update(bound_names(l) if l.strip() else {})
