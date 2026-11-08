@@ -133,8 +133,8 @@ for it: "run a review swarm for the security of this repository", or
    sign of life for 15 minutes goes to another agent. The supervisor records
    your decisions in the rules file, starts the next review pass of an area
    when the board asks for it (a fresh reviewer with no memory of earlier
-   passes, until 2 passes in a row find nothing worth fixing; ask for a
-   single pass for a quicker check), and replaces stopped agents;
+   passes, until 2 passes in a row find nothing at Medium or above, at most
+   6 passes per area; ask for a single pass for a quicker check), and replaces stopped agents;
 4. when every area is finished, has the whole range reviewed once more by one
    `commit-reviewer`, merges `swarm-review` into the source branch, pushes if
    your rules allow, and cleans the worktrees up.

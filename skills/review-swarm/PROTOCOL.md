@@ -72,7 +72,8 @@ log `$SW/ev <YOUR_NAME> stopped - "<why>"`.
 A reviewer writes each finding to $SW/queue/<id>.json (id = its name and a running number, R3-2) with the
 keys id, reviewer, title, tree (the worktree the reviewer read), severity, file, line, description,
 failure_scenario, suggested_fix, then runs `$SW/board report R3 R3-2`. A validator's verdict goes to
-$SW/val/<id>.txt. A design finding that replaces several (root-cause escalation) is named
+$SW/val/<id>.txt. A later change to its requirements is appended there as an AMENDED section
+(`board amend`), which overrides what it contradicts above. A design finding that replaces several (root-cause escalation) is named
 `<area>-D<n>`, e.g. R4-D1.
 
 ## Severity

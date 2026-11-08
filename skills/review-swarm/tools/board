@@ -21,6 +21,8 @@ dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, 
   board refuse AGENT ID              verifier: val/ID.refused.txt says why -> revise, back to the dev
   board block AGENT ID WHY           dev: no fix path -> unresolved
   board dispute AGENT ID             dev: val/ID.dispute.txt argues against the requirements -> revalidated
+  board amend AGENT ID TEXT          validator or supervisor: change ID's requirements; appends TEXT to
+                                     val/ID.txt, dated and signed, and logs it, in one step
   board release AGENT ID             give a claim back
   board beat AGENT                   keep AGENT's claims alive while it waits on something the log does not show
   board flag NAME on|off             supervisor: wind-down (devs take no new findings) or paused
@@ -439,6 +441,23 @@ def cmd_dispute(agent, fid):
         move(f, "reported", agent, f["note"])
 
 
+def cmd_amend(agent, fid, change):
+    """A changed requirement reaches the file the dev and the verifier read, and the log, together."""
+    p = os.path.join(S, "val", fid + ".txt")
+    if not change.strip():
+        die("say what changes: board amend AGENT ID TEXT")
+    with Locked():
+        f = load(fid)
+        need(f, fid, ("valid", "dev", "revise", "queued", "rev"))
+        if not os.path.exists(p):
+            die(f"{fid} has no val/{fid}.txt to amend")
+        stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+        with open(p, "a") as out:
+            out.write(f"\nAMENDED {stamp} by {agent}, replacing anything above that it contradicts:\n{change.strip()}\n")
+        log(agent, "amend", fid, change.strip())
+    print(f"{fid}: requirements amended in val/{fid}.txt")
+
+
 def cmd_release(agent, fid):
     with Locked():
         f = load(fid)
@@ -525,7 +544,11 @@ def tick():
             out.append(f"START reviewer {a}: board pass {a} start, then start it with that TREE and FIRST_N")
             continue
         if ps[-1] == "started" and done and closed:
-            clean = not any(h["state"] == "valid" for f in mine for h in f.get("history", []))
+            # Clean: no valid finding at or above clean_below. Lower ones are still fixed, but
+            # they no longer keep the area in review.
+            bar = RANK.get(c.get("clean_below", "Medium"), RANK["Medium"])
+            clean = not any(h["state"] == "valid" and RANK.get(f.get("severity"), 0) <= bar
+                            for f in mine for h in f.get("history", []))
             ps[-1] = "clean" if clean else "not clean"
             log("board", "pass", "", f"{a} {len(ps)} {ps[-1]}")
             run = 0
@@ -536,7 +559,10 @@ def tick():
             if run >= until:
                 log("board", "pass", "", f"{a} {len(ps)} finished")
                 ps[-1] = "finished"
-        if ps[-1] in ("finished", "stopped"):
+            elif len(ps) >= c.get("max_passes", 6):
+                log("board", "pass", "", f"{a} {len(ps)} capped")
+                ps[-1] = "capped"
+        if ps[-1] in ("finished", "capped", "stopped"):
             finished += 1
         elif ps[-1] in ("clean", "not clean"):
             if fl.get("wind-down"):
@@ -628,6 +654,47 @@ def git(*a, cwd=None):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+# One import statement on one line: Python `import x` / `from x import y`, JS/TS `import ... from "x"`.
+IMPORT_RE = re.compile(r"\s*(import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*"
+                       r"|from\s+[.\w]+\s+import\s+[\w*]+(\s+as\s+\w+)?(\s*,\s*\w+(\s+as\s+\w+)?)*"
+                       r"|import\s.+\sfrom\s+['\"][^'\"]+['\"];?)\s*")
+CONFLICT_RE = re.compile(r"^<<<<<<< [^\n]*\n(.*?)(?:^\|\|\|\|\|\|\| [^\n]*\n.*?)?^=======\n(.*?)^>>>>>>> [^\n]*\n",
+                         re.S | re.M)
+
+
+def only_imports(lines):
+    return all(not l.strip() or IMPORT_RE.fullmatch(l) for l in lines)
+
+
+def resolve_imports(wt, files):
+    """Resolve conflicts that are only in import lines by keeping both sides. False if any is not."""
+    for name in files:
+        p = os.path.join(wt, name)
+        try:
+            body = open(p).read()
+        except (OSError, UnicodeDecodeError):
+            return False
+        blocks = CONFLICT_RE.findall(body)
+        if not blocks or any(not only_imports((a + b).splitlines()) for a, b in blocks):
+            return False
+
+        def union(m):
+            ours = m.group(1).splitlines(keepends=True)
+            return "".join(ours + [l for l in m.group(2).splitlines(keepends=True) if l not in ours])
+        body = CONFLICT_RE.sub(union, body)
+        if "<<<<<<< " in body:
+            return False
+        open(p, "w").write(body)
+    return True
+
+
+def change_without_imports(cwd, a, b):
+    """The change a..b with import lines left out, to compare two versions of one change."""
+    d = subprocess.run(["git", "-C", cwd, "diff", "-U0", a, b], capture_output=True, text=True).stdout
+    return [l for l in d.splitlines() if l.startswith(("+++", "---"))
+            or (l[:1] in "+-" and l[1:].strip() and not IMPORT_RE.fullmatch(l[1:]))]
+
+
 def patch_id(cwd, a, b):
     d = subprocess.run(["git", "-C", cwd, "diff", a, b], capture_output=True, text=True).stdout
     r = subprocess.run(["git", "patch-id", "--stable"], input=d, capture_output=True, text=True).stdout
@@ -656,15 +723,34 @@ def merge_one(f, c):
         return f"could not check out {sha[:9]}"
     old = git("rev-parse", "swarm-review", cwd=wt)
     base = git("merge-base", sha, "swarm-review", cwd=wt)
-    if run("rebase", "-q", "swarm-review").returncode:
+    step, resolved = run("rebase", "-q", "swarm-review"), False
+    for _ in range(100):  # one round per commit of the change that conflicts
+        if not step.returncode:
+            break
         files = run("diff", "--name-only", "--diff-filter=U").stdout.split()
+        if not files or not resolve_imports(wt, files):
+            run("rebase", "--abort")
+            return (f"rebase conflict on swarm-review {old[:9]} in {' '.join(files) or '?'}: rebase, "
+                    "get it re-approved, resubmit")
+        run("add", "--", *files)
+        resolved = True
+        step = subprocess.run(["git", "-C", wt, "-c", "core.editor=true", "rebase", "--continue"],
+                              capture_output=True, text=True)
+    else:
         run("rebase", "--abort")
-        return f"rebase conflict on swarm-review {old[:9]} in {' '.join(files) or '?'}: rebase, get it re-approved, resubmit"
+        return f"rebase of {sha[:9]} onto {old[:9]} did not finish"
+    if resolved and c.get("import_fix_cmd"):
+        subprocess.run(["bash", "-c", c["import_fix_cmd"]], cwd=wt, capture_output=True)
+        if run("status", "--porcelain").stdout.strip():
+            run("commit", "-qa", "--amend", "--no-edit")
     head = git("rev-parse", "HEAD", cwd=wt)
     if head == old:
         return "the change is empty on swarm-review (already merged?)"
     if patch_id(wt, base, sha) != patch_id(wt, old, head):
-        return "the rebase changed the approved change: rebase it yourself, get it re-approved, resubmit"
+        # The approval stands when the two versions differ only in import lines.
+        if change_without_imports(wt, base, sha) != change_without_imports(wt, old, head):
+            return "the rebase changed the approved change: rebase it yourself, get it re-approved, resubmit"
+        log("merge-queue", "status", fid, "rebased with only import lines changed; the approval stands")
     log("merge-queue", "status", fid, f"testing {fid} rebased as {head[:9]}")
     logf = os.path.join(S, "mergeq", fid + ".log")
     os.makedirs(os.path.dirname(logf), exist_ok=True)
@@ -755,6 +841,7 @@ def main(a):
             "block": (3, lambda: cmd_block(r[0], r[1], " ".join(r[2:]))),
             "dispute": (2, lambda: cmd_dispute(*r[:2])),
             "release": (2, lambda: cmd_release(*r[:2])),
+            "amend": (3, lambda: cmd_amend(r[0], r[1], " ".join(r[2:]))),
             "beat": (1, lambda: beat(r[0])),
             "flag": (2, lambda: cmd_flag(*r[:2])),
             "pass": (2, lambda: cmd_pass(*r[:2])),

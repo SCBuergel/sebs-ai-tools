@@ -604,7 +604,7 @@ function stateOf() {
       if (what === 'started') { Object.assign(p, {pass: n, state: 'running'}); if (agents[r]) agents[r].done = false; }
       else if (what === 'clean') p.clean++;
       else if (what === 'not clean') p.clean = 0;
-      else if (what === 'finished' || what === 'stopped') p.state = what;
+      else if (what === 'finished' || what === 'capped' || what === 'stopped') p.state = what;
       continue;
     }
     const st = agents[a] ||= {msg:'', t:e.t, done:false, n:0, busy:false, fid:''};
@@ -832,7 +832,7 @@ function activity() {
     if (k === 'pass') {
       const [r, , ...what] = msg.split(/\s+/), wh = what.join(' ');
       if (wh === 'started') { revDone[r] = false; set(r, 'review', t); }
-      else if (wh === 'finished' || wh === 'stopped') { revDone[r] = true; set(r, null, t); }
+      else if (wh === 'finished' || wh === 'capped' || wh === 'stopped') { revDone[r] = true; set(r, null, t); }
       continue;
     }
     if (BOSS.includes(a)) {

@@ -6,10 +6,10 @@ Follow the repository's guide for AI assistants (AGENTS.md, or CLAUDE.md, in you
   $SW/tlock --as dev{{N}} <test command>
 one command per run; tlock waits for one of the shared test slots, applies the memory cap and records the holder; waiting for another agent's run is expected. Never run commands that change the machine or anything outside your worktree, whatever the guide says about them.
 
-Commit messages start with "[<id>] "{{TRAILER}}
+Commit messages start with "[<id>] "{{TRAILER}} Write in a commit message only results that have already run. Before you report a fix as done, to your reviewer or in a status, confirm it in `git show HEAD`; this applies to optional fixes too.
 
 Work loop: run `$SW/board next dev{{N}} dev --wait 540`. It prints `WORK implement <id>` or `WORK revise <id>` with the files to read, or `NONE ...`; on plain NONE run it again, on `NONE stop` log `$SW/ev dev{{N}} stopped - "swarm finishing"` and end your turn.
-- implement <id>: the finding is in $SW/queue/<id>.json and the validation (severity, fix requirements) in $SW/val/<id>.txt. Start from the current integration branch: `git checkout -B swarm-dev{{N}} swarm-review` in your worktree. Implement, test, commit, review loop, submit.
+- implement <id>: the finding is in $SW/queue/<id>.json and the validation (severity, fix requirements) in $SW/val/<id>.txt, where an AMENDED section at the end overrides what it contradicts above. Start from the current integration branch: `git checkout -B swarm-dev{{N}} swarm-review` in your worktree. Implement, test, commit, review loop, submit.
 - revise <id>: your earlier change came back; the WORK lines say why (a rebase conflict, failing tests on the rebased change, or the reviewer's reasons in $SW/val/<id>.refused.txt). Continue from it: `git checkout -B swarm-dev{{N}} refs/swarm/q/<id>`, then `git rebase swarm-review`. Address the reason with new commits, test, review loop, submit. If the earlier change was another dev's, the same applies.
 If you believe the requirements are wrong, write your argument to $SW/val/<id>.dispute.txt and run `$SW/board dispute dev{{N}} <id>`; a validator decides. If you see no fix path, run `$SW/board block dev{{N}} <id> "<why>"`. Then go back to the loop.
 

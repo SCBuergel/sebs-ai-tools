@@ -33,7 +33,9 @@ Roles, each a subagent started with the Agent tool from the briefs under
 - **Merge queue**: a process, not an agent (`board mergeq`). It rebases each
   approved change onto the integration branch `swarm-review`, runs the full
   test command on that exact commit, and fast-forwards. A conflict, a failed
-  test or a rebase that changed the code sends the card back to its dev. A
+  test or a rebase that changed the code sends the card back to its dev; a
+  conflict, or a difference, only in import lines it resolves itself, and the
+  approval stands. A
   failed run is repeated once: tests that fail and then pass send it back as
   `FLAKY`, to be fixed rather than merged.
 - **Dash** (optional): maintains the dashboards on the user's requests. The
@@ -64,6 +66,14 @@ tear down.
 - The checkout is clean and on the branch the review starts from.
 - `python3`, `flock` and `git worktree` are available; `systemd-run` is
   optional (without it tests run uncapped).
+- The agents can run the swarm's tools without a permission prompt. A prompt
+  nobody answers ends an agent's turn, and a refused one ends a review round
+  without a verdict. `swarm-init` prints the allow rules a swarm needs, with
+  `$SW` filled in: `Bash(<SW>/tlock:*)`, `Bash(<SW>/board:*)`,
+  `Bash(<SW>/ev:*)`, `Bash(python3 <SW>/board:*)`, `Bash(git worktree add:*)`
+  and `Bash(git worktree remove:*)`. Show them to the user, who can add them
+  with `/permissions` or to the project's `.claude/settings.local.json`.
+  Never edit the user's settings yourself.
 
 ## 2. Size the swarm
 
@@ -111,12 +121,19 @@ $PWD/.venv/bin/python"`. Use an absolute path: the worktrees have no
 virtualenv of their own. swarm-init writes it as the wrapper `$SW/py` and
 names it in the protocol, so no agent hunts for it; write `--test-cmd` with
 the wrapper's absolute path too, for example `"$SW/py -m pytest"` expanded by
-your shell.
+your shell. If the project sorts its imports with a tool, pass it as
+`--import-fix`, for example `--import-fix "ruff check --select I --fix"`: the
+merge queue resolves a rebase conflict that is only in import lines itself by
+keeping both sides, runs that, then the tests.
 
 By default each area is reviewed again and again by a fresh reviewer until 2
-passes in a row find nothing worth fixing. Pass `--one-pass` when the user
-asks for a quicker check with one reviewer per area, or `--until-clean K` for
-a different number of clean passes.
+passes in a row are clean: no valid finding at Medium or above. Low and Info
+findings are still fixed, but they do not keep an area in review, and an area
+gets at most 6 passes; the board logs one that hits the cap as `capped`. Pass
+`--one-pass` when the user asks for a quicker check with one reviewer per
+area, `--until-clean K` for a different number of clean passes,
+`--clean-below SEV` for another threshold, or `--max-passes P` for another
+cap.
 
 It copies the tools, writes `swarm.json`, `PROTOCOL.md`, `severity.md` and
 `rules.md`, creates branch `swarm-review` at HEAD and checks it out in the
@@ -206,6 +223,10 @@ Owner decisions go where the agents read them, not into messages:
 - An accepted tradeoff, or any other ruling on what counts as a finding: add
   it to `$SW/rules.md` with the date. Validators reread it before every
   verdict.
+- A ruling that changes what a validated finding's fix must do (a
+  requirement withdrawn or changed): `$SW/board amend supervisor <id>
+  "<the change>"`. It appends the change to `$SW/val/<id>.txt`, which the
+  dev and the verifier work from, and logs it in one step.
 - Pause (for example at a usage limit): `$SW/board flag paused on` and `$SW/ev
   supervisor stage - "paused <why>"`. Agents then find no work; resume with
   `flag paused off` and log the previous stage again.

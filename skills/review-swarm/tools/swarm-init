@@ -2,7 +2,8 @@
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
 #   swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S]
-#              [--until-clean K | --one-pass] [--regen-cmd CMD] [--py CMD] [--title TEXT]
+#              [--until-clean K | --one-pass] [--clean-below SEV] [--max-passes P] [--regen-cmd CMD]
+#              [--py CMD] [--import-fix CMD] [--title TEXT]
 #
 # --test-cmd records the repository's full test command in swarm.json (test_cmd): the merge queue
 # (`board mergeq`) fast-forwards swarm-review only after a passing run of it on the exact rebased commit.
@@ -15,6 +16,11 @@
 # By default each area's reviewer is rerun fresh until 2 passes in a row find nothing (SKILL.md,
 # "Repeated passes"); --until-clean K sets that number, --one-pass (the same as --until-clean 0) runs
 # every reviewer once. swarm.json records it as until_clean; a rerun without either option keeps it.
+# A pass is clean when it has no valid finding at or above --clean-below (default Medium): Low and Info
+# findings are still fixed, but they do not keep an area in review. --max-passes (default 6) caps the
+# passes per area; the board logs a capped area as "R3 6 capped". When a rebase conflict is only in import
+# lines, the merge queue keeps both sides itself; --import-fix names the project's import sorter to run
+# after that (for example 'ruff check --select I --fix'), before the tests.
 #
 # Run from the repository on a clean checkout of the branch the review starts from (the source
 # branch, usually main). It creates, or completes when run again:
@@ -27,7 +33,7 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until= tcmd= regen= py= nval= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= tcmd= regen= py= nval= below= maxp= ifix= title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -40,16 +46,21 @@ while [ $# -gt 0 ]; do
 		--test-cmd) tcmd=$2; shift 2 ;;
 		--regen-cmd) regen=$2; shift 2 ;;
 		--py) py=$2; shift 2 ;;
+		--clean-below) below=$2; shift 2 ;;
+		--max-passes) maxp=$2; shift 2 ;;
+		--import-fix) ifix=$2; shift 2 ;;
 		--validators) nval=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--regen-cmd CMD] [--py CMD] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--clean-below SEV] [--max-passes P] [--regen-cmd CMD] [--py CMD] [--import-fix CMD] [--title TEXT]" >&2; exit 2;
 }
 [ -n "$tcmd" ] || [ -s "$swarm/swarm.json" ] || { echo "--test-cmd is required: the merge queue tests every change with it" >&2; exit 2; }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
+case "$maxp" in ''|*[!0-9]*) [ -z "$maxp" ] || { echo "--max-passes takes a number" >&2; exit 2; } ;; esac
+case "$below" in ''|Critical|High|Medium|Low|Info) ;; *) echo "--clean-below takes Critical, High, Medium, Low or Info" >&2; exit 2 ;; esac
 repo=$(realpath "$repo")
 git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
 [ -z "$(git -C "$repo" status --porcelain)" ] || { echo "the repository has uncommitted changes" >&2; exit 1; }
@@ -75,15 +86,17 @@ touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
 [ -e "$swarm/rules.md" ] || cp "$here/../rules.md" "$swarm/rules.md"
 # swarm.json is written once; a rerun only records the options given now
-python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" "$py" <<'EOF'
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" "$py" "$below" "$maxp" "$ifix" <<'EOF'
 import json, os, sys
-s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval, py = sys.argv[1:]
+s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval, py, below, maxp, ifix = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots), "validators": 2,
-       "repo": repo, "source_branch": source, "until_clean": 2} if new else json.load(open(p))
+       "repo": repo, "source_branch": source, "until_clean": 2, "clean_below": "Medium",
+       "max_passes": 6} if new else json.load(open(p))
 for key, val in (("until_clean", until and int(until)), ("test_cmd", tcmd), ("regen_cmd", regen),
-                 ("validators", nval and int(nval)), ("py", py)):
+                 ("validators", nval and int(nval)), ("py", py), ("clean_below", below),
+                 ("max_passes", maxp and int(maxp)), ("import_fix_cmd", ifix)):
     if val != "":
         cfg[key] = val
 json.dump(cfg, open(p, "w"), indent=1)
@@ -142,4 +155,7 @@ reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean
 next:         fill in the Task section of $swarm/PROTOCOL.md and $swarm/rules.md, then start the agents
 board:        $swarm/board tick      $swarm/board show      merge queue: python3 $swarm/board mergeq
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
+allow rules:  for agents to run without permission prompts, the user may add (this script changes no settings):
+              Bash($swarm/tlock:*)  Bash($swarm/board:*)  Bash($swarm/ev:*)  Bash(python3 $swarm/board:*)
+              Bash(git worktree add:*)  Bash(git worktree remove:*)
 EOF

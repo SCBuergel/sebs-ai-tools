@@ -264,7 +264,7 @@ def stage_name(msg):
 
 
 def pass_event(e, passes):
-    """Apply `ev board pass - "R9 23 started|clean|not clean|finished|stopped"` to passes[R9]."""
+    """Apply `ev board pass - "R9 23 started|clean|not clean|finished|capped|stopped"` to passes[R9]."""
     w = e["msg"].split()
     if len(w) < 3 or not w[1].isdigit():
         return None
@@ -277,7 +277,7 @@ def pass_event(e, passes):
         p["clean"] += 1
     elif what == "not clean":
         p["clean"] = 0
-    elif what in ("finished", "stopped"):
+    elif what in ("finished", "capped", "stopped"):
         p["state"] = what
     return r if what == "started" else None
 
@@ -367,7 +367,7 @@ def area(r, agents, findings, passes, sname=""):
     agreed = sum(f["state"] == "agreed" for f in mine)
     st, p = agents.get(r), passes.get(r)
     verifying = next((i for i, f in findings.items() if f["by"] == r and own_rev(f)), None)
-    if p and p["state"] in ("finished", "stopped"):
+    if p and p["state"] in ("finished", "capped", "stopped"):
         return f"area {p['state']} after pass {p['pass']}", 46, True, opn, agreed
     if p and sname in ENDED:
         return f"pass {p['pass']} ended with the swarm ({sname})", 245, True, opn, agreed

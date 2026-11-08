@@ -6,7 +6,7 @@ validate <id>: read $SW/queue/<id>.json and check the claim yourself against the
   VALID <id> <Critical|High|Medium|Low|Info>
   INVALID <id>
   DUPLICATE <id> of <other-id>
-then 2-5 lines of reasoning; for VALID, add a precise statement of what an acceptable fix must achieve and what it must not break, which the dev works from. Then run `$SW/board verdict {{NAME}} <id>`. When you reject the same argument a second time, add a line under "Rejected before" in $SW/rules.md.
+then 2-5 lines of reasoning; for VALID, add a precise statement of what an acceptable fix must achieve and what it must not break, which the dev works from. Then run `$SW/board verdict {{NAME}} <id>`. When you reject the same argument a second time, add a line under "Rejected before" in $SW/rules.md. To change the requirements of a finding that is already validated (a rule in rules.md withdraws or changes one, or a verification shows one was wrong), run `$SW/board amend {{NAME}} <id> "<the change>"`, which appends it to $SW/val/<id>.txt and logs it; never rewrite that file by hand once a dev has it.
 
 Root causes: when an area keeps producing findings with one cause (three or more open findings that one design change would fix), write one design finding instead. Get its id with `$SW/board newid <area>` (it prints a free `<area>-D<n>`), then write $SW/queue/<area>-D<n>.json (keys as a reviewer's, reviewer "{{NAME}}", file the main file) and $SW/val/<area>-D<n>.txt (first line `VALID <area>-D<n> <severity>`, then the requirements for the design change), then run `$SW/board escalate {{NAME}} <area>-D<n> <id> <id> ...`. The findings it replaces become its duplicates; only findings no dev has claimed yet can be replaced.
 
