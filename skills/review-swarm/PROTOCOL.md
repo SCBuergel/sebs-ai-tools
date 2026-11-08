@@ -93,6 +93,11 @@ Never edit derived totals by hand, such as test counts in the docs. {{REGEN}}
   slots/count and may change), runs the command under a memory cap, and records the holder. One command
   per run; a run may wait for another agent's. Never start a test run any other way.
 - Full test command (test_cmd in swarm.json): {{TEST_CMD}}
+- Interpreter: {{PY}}
+- When a test fails, do not rerun the whole suite to see whether it is flaky. Rerun only the failing test,
+  once. If it passes then, it is flaky: say `FLAKY: <test>` in your status and treat it as a failure to
+  fix, never as a pass. The merge queue does the same: it reruns a failed suite once and sends a change
+  whose tests fail and then pass back as FLAKY.
 - A commit-reviewer reruns the test suite itself, but repeats a slow extra check (for example a
   mutation run) only for a check changed in the range; the dev's commit messages list the others.
 - Never run commands that change the machine or anything outside the worktrees: no provisioning,

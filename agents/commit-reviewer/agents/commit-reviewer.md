@@ -14,6 +14,8 @@ not evidence, and it may be anchored on the author's own view.
 
 Read first: the repository's guide for AI assistants (`AGENTS.md`, or
 `CLAUDE.md` when there is no `AGENTS.md`), including the files it imports.
+Find it with `ls AGENTS.md CLAUDE.md 2>/dev/null`, which lists the ones
+that exist without failing on the others.
 It states the project's priorities, invariants, and test commands. When it
 names documents to read for security-sensitive or trust-boundary changes,
 read those too whenever the range touches such areas.
@@ -38,6 +40,8 @@ Then, for the given range:
    behaviour and nothing that no longer exists.
 5. Never claim that behaviour was tested on a platform the local harness
    cannot reach. Say what remains unverified.
+6. When you check that a secret (a token, key or password) is absent from
+   output, logs or files, print counts or hashes, never the secret itself.
 
 Report in this form and nothing else:
 

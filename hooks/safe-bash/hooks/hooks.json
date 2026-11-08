@@ -1,0 +1,16 @@
+{
+  "description": "Refuse Bash commands that kill or find processes by matching their full command line, which also matches the shell running them.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/refuse-self-match.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

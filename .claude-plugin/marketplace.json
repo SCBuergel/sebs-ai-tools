@@ -41,7 +41,7 @@
       "name": "commit-reviewer",
       "source": "./agents/commit-reviewer",
       "strict": false,
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "Independent read-only reviewer agent: give it a commit range and it answers APPROVED or NOT APPROVED with findings, after reading the repository's AI guide and running its tests.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -51,7 +51,7 @@
       "source": "./skills/review-loop",
       "strict": false,
       "skills": ["./"],
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "Send the latest local commits to the reviewer session running next to this one, fix its findings, resubmit, and push only on APPROVED.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -61,7 +61,7 @@
       "source": "./skills/review-swarm",
       "strict": false,
       "skills": ["./"],
-      "version": "0.4.0",
+      "version": "0.4.1",
       "description": "Run a review swarm that coordinates through a shared work board: reviewers audit one area each, short-lived validators judge their findings, devs fix them in parallel with their own commit-reviewers, and a test-gated merge queue merges each fix, watched on a terminal and a web dashboard.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -74,6 +74,15 @@
       "version": "0.2.0",
       "description": "Retrospective over agent sessions, including long multi-agent runs: scores friction deterministically across a session and its subagents, then proposes most-severe-first fixes to the environment, skills and workflows. Proposes only.",
       "author": { "name": "Teebor-Choka, extended by Sebastian C. Bürgel" },
+      "license": "MIT"
+    },
+    {
+      "name": "safe-bash",
+      "source": "./hooks/safe-bash",
+      "strict": false,
+      "version": "0.1.0",
+      "description": "A hook that refuses Bash commands matching processes by their full command line (pkill -f, pgrep -f, killall -r), which also match, and kill, the shell running them.",
+      "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
     }
   ]

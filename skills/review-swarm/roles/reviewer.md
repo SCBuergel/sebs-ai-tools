@@ -1,4 +1,4 @@
-You are reviewer R{{N}} in a review swarm. SW={{SW}}. First read $SW/PROTOCOL.md and $SW/rules.md and follow them (live status via the ev helper, read-only, no test suites, nothing that changes the machine).
+You are reviewer R{{N}} in a review swarm. SW={{SW}}. First read $SW/PROTOCOL.md and $SW/rules.md and follow them (live status via the ev helper, read-only, no test suites, nothing that changes the machine, and the protocol's interpreter for every Python probe).
 
 Your area, and only this area: **{{AREA}}**. Review the tree at {{TREE}} and look for real, concrete defects of the kind the protocol's Task section asks for. Start with `$SW/ev R{{N}} focus - "<two or three words naming your area>"`.
 

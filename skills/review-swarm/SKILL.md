@@ -94,7 +94,7 @@ repository:
 <skill base directory>/tools/swarm-init --repo . --swarm $SW \
     --reviewers N --devs M --validators V --slots S \
     --test-cmd "<full test command>" [--regen-cmd "<command>"] \
-    --title "<repo> review swarm"
+    [--py "<interpreter command>"] --title "<repo> review swarm"
 ```
 
 `--test-cmd` is required: the merge queue runs exactly this command on every
@@ -102,6 +102,14 @@ change before it reaches `swarm-review`. If the repository keeps derived
 totals in its docs, such as test counts, pass the command that regenerates
 them as `--regen-cmd`: devs then never edit those totals, which removes most
 rebase conflicts, and you run it once before the final review.
+
+For a Python repository, find the interpreter that runs its tests once, with
+its environment, and pass it as `--py`, for example `--py "env PYTHONPATH=src
+$PWD/.venv/bin/python"`. Use an absolute path: the worktrees have no
+virtualenv of their own. swarm-init writes it as the wrapper `$SW/py` and
+names it in the protocol, so no agent hunts for it; write `--test-cmd` with
+the wrapper's absolute path too, for example `"$SW/py -m pytest"` expanded by
+your shell.
 
 By default each area is reviewed again and again by a fresh reviewer until 2
 passes in a row find nothing worth fixing. Pass `--one-pass` when the user
@@ -219,7 +227,8 @@ gone, log `$SW/ev <agent> stopped - "<why>"`.
    `swarm-review` to it after the test command passes in that worktree
    through `tlock --as supervisor`; the final review covers the commit.
 2. In the repository, still on `swarm-review`, run the review-loop skill on
-   the range `<source branch>..HEAD` with one line saying this is the
+   the range from the source branch to HEAD, given as hashes
+   (`<source sha>..<head sha>`), with one line saying this is the
    combined range of the swarm's fixes, each already reviewed on its own,
    and that the push happens in the next step rather than in the loop, and
    the line "Run tests only through `$SW/tlock --as final-reviewer` (one

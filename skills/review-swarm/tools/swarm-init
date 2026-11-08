@@ -2,13 +2,16 @@
 # swarm-init: set up the swarm folder and the git trees for a review swarm.
 #
 #   swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S]
-#              [--until-clean K | --one-pass] [--regen-cmd CMD] [--title TEXT]
+#              [--until-clean K | --one-pass] [--regen-cmd CMD] [--py CMD] [--title TEXT]
 #
 # --test-cmd records the repository's full test command in swarm.json (test_cmd): the merge queue
 # (`board mergeq`) fast-forwards swarm-review only after a passing run of it on the exact rebased commit.
 # --validators sets how many validators the supervisor keeps alive (default 2). --regen-cmd records the
 # command that regenerates derived totals (test counts in the docs, for example); devs never edit those
-# by hand, and the supervisor runs it once before the final review.
+# by hand, and the supervisor runs it once before the final review. --py records the project's interpreter
+# with its environment (for example 'env PYTHONPATH=src /abs/repo/.venv/bin/python'; a worktree has no
+# venv of its own, so give its absolute path) as the wrapper $SW/py, which every agent uses for every
+# ad-hoc probe and which the test command should use too.
 # By default each area's reviewer is rerun fresh until 2 passes in a row find nothing (SKILL.md,
 # "Repeated passes"); --until-clean K sets that number, --one-pass (the same as --until-clean 0) runs
 # every reviewer once. swarm.json records it as until_clean; a rerun without either option keeps it.
@@ -24,7 +27,7 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until= tcmd= regen= nval= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= tcmd= regen= py= nval= title="REVIEW SWARM"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -36,13 +39,14 @@ while [ $# -gt 0 ]; do
 		--one-pass) until=0; shift ;;
 		--test-cmd) tcmd=$2; shift 2 ;;
 		--regen-cmd) regen=$2; shift 2 ;;
+		--py) py=$2; shift 2 ;;
 		--validators) nval=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 [ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--regen-cmd CMD] [--title TEXT]" >&2; exit 2;
+	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--regen-cmd CMD] [--py CMD] [--title TEXT]" >&2; exit 2;
 }
 [ -n "$tcmd" ] || [ -s "$swarm/swarm.json" ] || { echo "--test-cmd is required: the merge queue tests every change with it" >&2; exit 2; }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
@@ -71,15 +75,15 @@ touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
 [ -e "$swarm/rules.md" ] || cp "$here/../rules.md" "$swarm/rules.md"
 # swarm.json is written once; a rerun only records the options given now
-python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" <<'EOF'
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" "$py" <<'EOF'
 import json, os, sys
-s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval = sys.argv[1:]
+s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval, py = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots), "validators": 2,
        "repo": repo, "source_branch": source, "until_clean": 2} if new else json.load(open(p))
 for key, val in (("until_clean", until and int(until)), ("test_cmd", tcmd), ("regen_cmd", regen),
-                 ("validators", nval and int(nval))):
+                 ("validators", nval and int(nval)), ("py", py)):
     if val != "":
         cfg[key] = val
 json.dump(cfg, open(p, "w"), indent=1)
@@ -90,7 +94,7 @@ until=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("un
 	"$here/../PROTOCOL.md" > "$swarm/PROTOCOL.md"
 # the test command may hold any character, so it goes in without sed; a rerun with --test-cmd updates it
 python3 - "$swarm" <<'EOF'
-import json, re, sys
+import json, os, re, sys
 s = sys.argv[1]
 t = json.load(open(f"{s}/swarm.json")).get("test_cmd")
 line = (f"`{t}`. The merge queue fast-forwards swarm-review only after a passing run of it on the exact rebased commit"
@@ -103,7 +107,16 @@ regen = (f"The supervisor regenerates them once, with `{g}`, before the final re
 regen += " Only if a test checks a total does a fix update it, as part of the same change."
 p = re.sub(r"(Never edit derived totals by hand, such as test counts in the docs\. ).*",
            lambda m: m.group(1) + regen, p.replace("{{REGEN}}", regen))
+py = json.load(open(f"{s}/swarm.json")).get("py")
+interp = (f"`$SW/py` (it runs `{py}`). Use it, from your tree's root, for every Python command: probes, "
+          "scripts, one-off checks. Never hunt for another interpreter or virtualenv" if py else
+          "none recorded; use what the repository guide names, and ask the supervisor once if a probe needs more")
+p = re.sub(r"(Interpreter: ).*", lambda m: m.group(1) + interp + ".", p.replace("{{PY}}", interp + "."))
 open(f"{s}/PROTOCOL.md", "w").write(p)
+if py:  # a rerun with --py replaces the wrapper
+    open(f"{s}/py", "w").write("#!/bin/sh\n# The project's interpreter for every agent (swarm-init --py).\n"
+                               f"exec {py} \"$@\"\n")
+    os.chmod(f"{s}/py", 0o755)
 EOF
 
 if git -C "$repo" show-ref --verify --quiet refs/heads/swarm-review; then

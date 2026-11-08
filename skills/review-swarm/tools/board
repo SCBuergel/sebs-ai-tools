@@ -634,6 +634,17 @@ def patch_id(cwd, a, b):
     return r.split()[0] if r.split() else ""
 
 
+def run_tests(wt, cmd, logf):
+    """Run the full test command through tlock in the merge tree; returns its exit code."""
+    with open(logf, "w") as out:
+        p = subprocess.Popen([os.path.join(S, "tlock"), "--as", "merge-queue", "bash", "-c", cmd],
+                             cwd=wt, stdout=out, stderr=subprocess.STDOUT)
+        while p.poll() is None:  # waiting for a slot or testing is a sign of life
+            beat("merge-queue")
+            time.sleep(10)
+        return p.returncode
+
+
 def merge_one(f, c):
     """Rebase the approved change onto swarm-review, test that exact commit, fast-forward. Returns why not, or None."""
     wt, fid, sha = os.path.join(S, "merge"), f["id"], f["sha"]
@@ -657,15 +668,16 @@ def merge_one(f, c):
     log("merge-queue", "status", fid, f"testing {fid} rebased as {head[:9]}")
     logf = os.path.join(S, "mergeq", fid + ".log")
     os.makedirs(os.path.dirname(logf), exist_ok=True)
-    with open(logf, "w") as out:
-        p = subprocess.Popen([os.path.join(S, "tlock"), "--as", "merge-queue", "bash", "-c", c["test_cmd"]],
-                             cwd=wt, stdout=out, stderr=subprocess.STDOUT)
-        while p.poll() is None:  # waiting for a slot or testing is a sign of life
-            beat("merge-queue")
-            time.sleep(10)
-        rc = p.returncode
+    rc = run_tests(wt, c["test_cmd"], logf)
     if rc:
-        return f"the tests failed (rc={rc}) on the rebased change {head[:9]}; output in {logf}"
+        # Run the same commit once more, so a flaky test is named as such instead of every agent
+        # rerunning the suite by hand. It still goes back: merging needs a clean first run.
+        if not run_tests(wt, c["test_cmd"], logf + ".rerun"):
+            log("merge-queue", "status", fid, f"FLAKY: tests failed then passed on {head[:9]}")
+            return (f"FLAKY: the tests failed (rc={rc}) on the rebased change {head[:9]}, then passed on a rerun "
+                    f"of the same commit; compare {logf} with {logf}.rerun. Fix the flaky test, whether or not "
+                    f"this change caused it, get it re-approved, resubmit")
+        return f"the tests failed (rc={rc}) on the rebased change {head[:9]}, and again on a rerun; output in {logf}"
     if git("rev-parse", "swarm-review", cwd=wt) != old:
         return "retry"
     ff = subprocess.run(["git", "-C", c["repo"], "merge", "-q", "--ff-only", head], capture_output=True, text=True)

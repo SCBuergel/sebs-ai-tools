@@ -1,18 +1,21 @@
 # Seb's AI tools
 
-Seb's AI tools are skills and agents for Claude Code. A skill is a set of
+Seb's AI tools are skills, agents and a hook for Claude Code. A skill is a set of
 instructions, in a `SKILL.md` file, that Claude loads into the current
 session when a task calls for it; its work happens in that session, where
 you can watch it. An agent is a separate Claude with its own instructions
 and tools, which the session starts for one delimited task and which
 reports back; it does not see the session's conversation, which is the
-point when the task is an independent check such as a review.
+point when the task is an independent check such as a review. A hook is
+a check that Claude Code itself runs before a tool call, whatever the
+session's instructions say, so it holds where a sentence in a skill may be
+missed.
 
 This repository is a Claude Code
 [plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
 named `sebs-ai-tools`. A marketplace lists plugins, which are what you
-install. Each plugin here contains exactly one skill or one agent with the
-same name, so you install only what you want.
+install. Each plugin here contains exactly one skill, one agent or one hook
+with the same name, so you install only what you want.
 
 | Skill | What it does |
 | --- | --- |
@@ -27,6 +30,10 @@ same name, so you install only what you want.
 | --- | --- |
 | `commit-reviewer` | Reviews the commits not pushed yet, or a range you name, in the current repository and answers `APPROVED` or `NOT APPROVED` with findings. It reads the repository's guide for AI assistants (`AGENTS.md` or `CLAUDE.md`), judges the diff by that guide's priorities and invariants, runs the tests the guide names, and checks that the docs match the change. It only reads; it never edits, commits, or pushes. Because it starts without the author's reasoning, its verdict is not anchored on it. |
 
+| Hook | What it does |
+| --- | --- |
+| `safe-bash` | Refuses Bash commands that find or kill processes by their full command line: `pkill -f`, `pgrep -f` (or `--full`) and `killall -r`. The shell running such a command has the pattern in its own command line, so `pkill -f` kills that shell and the rest of the command's output is lost. The refusal tells the agent to kill by PID instead. It applies to every session once installed, including subagents and swarm agents. |
+
 ## Install
 
 In a terminal, add the marketplace once, then install each plugin you want
@@ -39,6 +46,7 @@ claude plugin install test-gnosis-vpn@sebs-ai-tools
 claude plugin install report-gnosis-vpn-results@sebs-ai-tools
 claude plugin install review-loop@sebs-ai-tools
 claude plugin install commit-reviewer@sebs-ai-tools
+claude plugin install safe-bash@sebs-ai-tools
 claude plugin install review-swarm@sebs-ai-tools
 claude plugin install reflect@sebs-ai-tools
 ```
@@ -71,8 +79,9 @@ The `review-loop` skill and the `commit-reviewer` agent work together.
 Install both. In the session where you develop, ask for a review: "get this
 reviewed", or `/review-loop:review-loop`. That session then:
 
-1. commits your work and determines the range to review: every commit not
-   on the upstream branch yet;
+1. commits your work, with each check chained to its commit so a failing
+   check stops it, and determines the range to review: every commit not on
+   the upstream branch yet, named by its commit hashes;
 2. starts `commit-reviewer` as a subagent with that range and at most a
    one-line pointer to what the change is about;
 3. fixes the findings in the verdict, commits, and resubmits to the same
@@ -167,24 +176,29 @@ claude plugin marketplace remove sebs-ai-tools
 ### How the repository is laid out
 
 ```text
-.claude-plugin/marketplace.json    the marketplace: one plugin entry per skill or agent
+.claude-plugin/marketplace.json    the marketplace: one plugin entry per skill, agent or hook
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
                                    (review-swarm: roles/ briefs, tools/ scripts, rules.md)
                                    (reflect: scan-sessions.py, tests/, LICENSE.upstream)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
+hooks/<hook-name>/hooks/hooks.json a hook: when it runs, plus its script and tests/
 evals/<skill-name>/<case>/         optional test cases for a skill
 evals/run.sh                       runs a skill's test cases
 ```
 
-Skills live under `skills/`, agents under `agents/`, one folder per plugin,
+Skills live under `skills/`, agents under `agents/`, hooks under `hooks/`,
+one folder per plugin,
 and the plugin is named after its folder. The two kinds differ one level
 down. A skill is a folder with a `SKILL.md`, and Claude Code accepts a
 pointer to that folder. An agent is a single `.md` file, and Claude Code
 finds it only by scanning a folder named `agents/` inside the plugin; it
 ignores a list of agent files in the manifest. So the agent's own folder
 holds an `agents/` subfolder with the file, which gives the doubled name
-`agents/<agent-name>/agents/<agent-name>.md`.
+`agents/<agent-name>/agents/<agent-name>.md`. A hook works the same way:
+Claude Code reads `hooks/hooks.json` inside the plugin, which gives
+`hooks/<hook-name>/hooks/hooks.json`; its command finds its script through
+`${CLAUDE_PLUGIN_ROOT}`.
 
 There is no `plugin.json` per plugin. Instead, each entry in
 `marketplace.json` defines its plugin itself (`"strict": false`) and uses
@@ -231,10 +245,20 @@ nobody who already has the plugin.
 3. Run the checks in [Validate and test before pushing](#validate-and-test-before-pushing),
    then commit and push.
 
-### Change a skill or an agent
+### Add a hook
 
-1. Edit the files under `skills/<skill-name>/` or
-   `agents/<agent-name>/agents/`.
+1. Create `hooks/<hook-name>/hooks/hooks.json` with the event, the matcher
+   and a command that runs a script next to it through
+   `${CLAUDE_PLUGIN_ROOT}`, and a test under `hooks/<hook-name>/tests/`.
+2. Add an entry to the `plugins` array in `.claude-plugin/marketplace.json`
+   as for an agent, with `"source": "./hooks/<hook-name>"`.
+3. Run its tests and the checks in [Validate and test before pushing](#validate-and-test-before-pushing),
+   then commit and push.
+
+### Change a skill, an agent or a hook
+
+1. Edit the files under `skills/<skill-name>/`,
+   `agents/<agent-name>/agents/` or `hooks/<hook-name>/`.
 2. Bump that plugin's `version` in `.claude-plugin/marketplace.json`.
 3. Run the checks in [Validate and test before pushing](#validate-and-test-before-pushing),
    then commit and push.
@@ -268,7 +292,8 @@ unset CLAUDE_CONFIG_DIR
 
 `claude plugin details` should show the version from `marketplace.json`
 and, under `Component inventory`, only that plugin's component: `Skills (1)`
-or `Agents (1)` followed by its name, and `(0)` for the other kind. If the
+or `Agents (1)` followed by its name, or `Hooks (1)` followed by its event,
+and `(0)` for the other kinds. If the
 component is missing, check that the entry's `source` points at the right
 folder and that the `name` in the front matter matches the folder or file
 name. If another component is listed as well, the entry's `source` is too

@@ -14,7 +14,10 @@ below the prompt and under `/tasks`.
 ## 1. Commit
 
 Finish the change, run the repository's tests as its guide requires, and
-commit locally. The review covers every commit that is not on the
+commit locally. Chain the check and the commit in one command, `<check> &&
+git commit ...`, so a failing check stops the commit; never run them as
+separate commands in one call, where the commit runs whatever the check
+said. The review covers every commit that is not on the
 upstream branch yet: `@{upstream}..HEAD`. If the branch has no upstream,
 use the remote's default branch, for example `origin/main..HEAD`. If that
 range is empty, tell the user there is nothing to review and stop. The user
@@ -22,9 +25,15 @@ may name another range instead; then use that.
 
 ## 2. Start the reviewer
 
+Resolve the range to exact commit hashes first, one `rev-parse` per end
+(`git rev-parse --short` takes a single revision):
+`echo "$(git rev-parse --short <base>)..$(git rev-parse --short HEAD)"`.
+A branch name moves while the reviewer works and sends it looking for the
+hashes; keep it only as a label in the line about the change.
+
 Start one `commit-reviewer:commit-reviewer` subagent with a prompt whose
-first line is `Review request: <range> in <repository path>`, followed by at
-most one line saying what the change is about. Do not describe how it works
+first line is `Review request: <base-sha>..<head-sha> in <repository
+path>`, followed by at most one line saying what the change is about. Do not describe how it works
 or why it is correct: that would anchor the reviewer on your view. Keep the
 agent's id; every later round goes to this same agent.
 
@@ -37,7 +46,7 @@ agent's id; every later round goes to this same agent.
   with `git branch --show-current` that you are still on the branch you
   started on (a reviewer that switched the checkout would otherwise put the
   fix on a detached HEAD), and commit. Then resume the same reviewer with SendMessage: the range,
-  recomputed as in step 1 so it includes the fix commits, plus one line per
+  recomputed as in steps 1 and 2 so it includes the fix commits, as hashes, plus one line per
   earlier finding saying fixed, or why you think it is wrong. Never start a
   second reviewer for the same batch; a fresh one would not know what it
   already found.
