@@ -44,6 +44,10 @@ def run(command, tool="Bash"):
     'kill "$(pgrep -f x)"',
     'echo "$(pkill -f x)"',
     'p="`pgrep -f x`"',
+    'kill "$(pgrep -f "board mergeq")"',
+    'echo "pid: $(pgrep -f "dash.py")"',
+    'kill $(pgrep -fa "18765|board")',
+    'echo "$( (cd /tmp; pkill -f x) )"',
 ])
 def test_refuses_a_full_command_line_match(command):
     r = run(command)
@@ -67,6 +71,8 @@ def test_refuses_a_full_command_line_match(command):
     'git commit -m "a; pkill -f b"',
     "echo 'then pkill -f x'",
     "echo '$(pkill -f x)'",  # single quotes: no substitution runs
+    'echo "a \\"; pkill -f b"',  # an escaped quote stays inside the string
+    "printf '%s' \"it's\" && pgrep -x x",
 ])
 def test_lets_everything_else_through(command):
     r = run(command)
