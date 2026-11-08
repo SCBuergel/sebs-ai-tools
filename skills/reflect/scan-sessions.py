@@ -115,6 +115,12 @@ INJECTED_RE = re.compile(
 PEER_RE = re.compile(r"<(cross-session-message|teammate-message)\b")
 # A message from another agent of the same session (a subagent's own reviewer, a lead).
 AGENT_MSG_RE = re.compile(r"<agent-message\b")
+# The message itself inside the harness's wrapper, whose intro and closing note (which says
+# "refuse ...") are the same on every message and must not be read as its content.
+MESSAGE_TAG_RE = re.compile(
+    r"<(cross-session-message|teammate-message|agent-message)\b[^>]*>(.*?)(</\1>|$)", re.S)
+LEAD_WRAPPER_RE = re.compile(
+    r"^[^\n]*sent a message while you were working:\n(.*?)(\n\nAddress this before[^\n]*)?$", re.S)
 # The harness reports each subagent's end, with its usage, in the parent's transcript.
 NOTIFICATION_RE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
 MOMENT_CAP = 20  # flagged moments reported per transcript of up to 1500 lines
@@ -156,8 +162,12 @@ def is_tool_result(content):
 
 
 def last_program(command):
-    """The program whose exit status a shell command reports: the last one in its pipeline."""
-    tail = re.split(r"\|\||&&|[|;\n]", command or "")[-1].split()
+    """The program whose exit status a shell command reports: the last one in its pipeline.
+    None when a list (&&, ||, ;) could have stopped at an earlier program, except after cd."""
+    command = re.sub(r"^(\s*cd\s+[^&|;\n]+&&)+", "", (command or "").strip())
+    if re.search(r"&&|\|\||[;\n]", command):
+        return None
+    tail = command.split("|")[-1].split()
     while tail and re.match(r"^\w+=", tail[0]):  # VAR=value prefixes
         tail = tail[1:]
     return os.path.basename(tail[0]) if tail else None
@@ -183,6 +193,14 @@ def is_error_result(text, tool_name, command):
     if tool_name == "Bash" and READ_CMD_RE.search(command or ""):
         return False
     return len(text) <= SHORT_RESULT and bool(ERROR_RE.search(text))
+
+
+def message_body(origin, text):
+    """What another session or agent actually wrote, without the harness's wrapper."""
+    if isinstance(origin, dict) and isinstance(origin.get("body"), str):
+        return origin["body"]
+    m = MESSAGE_TAG_RE.search(text) or LEAD_WRAPPER_RE.match(text)
+    return (m.group(2) if m.re is MESSAGE_TAG_RE else m.group(1)).strip() if m else text
 
 
 def is_injected(entry, raw_line):
@@ -267,9 +285,9 @@ def score_session(path, moments_override=None, seen_uuids=None):
         else:
             d[key] = [1, ln]
 
-    def note_peer(entry, origin, text, ln):
-        origin = origin if isinstance(origin, dict) else {}
-        key = origin.get("msg_id") or re.sub(r"\s+", " ", text)[:400]
+    def note_peer(origin, text, ln):
+        # Keyed on the message itself: a queued copy and its delivery wrap it differently.
+        key = re.sub(r"\s+", " ", message_body(origin, text))[:400]
         if key not in peer_seen:
             peer_seen.add(key)
             peer_hits.append((ln, excerpt(text)))
@@ -305,6 +323,7 @@ def score_session(path, moments_override=None, seen_uuids=None):
             sidechain = sidechain or bool(o.get("isSidechain"))
             if seen_uuids is not None and o.get("uuid"):
                 if o["uuid"] in seen_uuids:
+                    seen_assistant = seen_assistant or o.get("type") == "assistant"
                     continue
                 seen_uuids.add(o["uuid"])
             typ = o.get("type")
@@ -316,8 +335,8 @@ def score_session(path, moments_override=None, seen_uuids=None):
                 att = o.get("attachment")
                 if isinstance(att, dict) and isinstance(att.get("prompt"), str):
                     t = att["prompt"]
-                    if PEER_RE.search(t):
-                        note_peer(o, att.get("origin"), t, ln)
+                    if PEER_RE.search(t) or AGENT_MSG_RE.search(t):
+                        note_peer(att.get("origin"), t, ln)
                 continue
 
             if typ == "assistant":
@@ -355,13 +374,14 @@ def score_session(path, moments_override=None, seen_uuids=None):
                             add_usage(n, ln)
                     if notified or t.startswith("[SYSTEM NOTIFICATION"):
                         continue  # the harness reporting, not an agent asking
+                    body = message_body(origin, t)
                     if PEER_RE.search(t) or AGENT_MSG_RE.search(t) or origin.get("kind") == "peer":
-                        note_peer(o, origin, t, ln)
-                        if sidechain and REWORK_RE.search(t):
-                            rework_hits.append((ln, excerpt(t)))
-                    elif sidechain and origin.get("kind") and REWORK_RE.search(t):
+                        note_peer(origin, t, ln)
+                        if sidechain and REWORK_RE.search(body):
+                            rework_hits.append((ln, excerpt(body)))
+                    elif sidechain and origin.get("kind") and REWORK_RE.search(body):
                         # e.g. a lead agent's "REVISE R4-2"; a new assignment is not rework
-                        rework_hits.append((ln, excerpt(t)))
+                        rework_hits.append((ln, excerpt(body)))
                 elif seen_assistant:
                     t = text_of(content)
                     if not t:
