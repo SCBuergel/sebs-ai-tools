@@ -278,6 +278,27 @@ def test_messages_from_other_sessions_are_not_the_user(tmp_path):
     assert r["signals"]["peer_messages"] == 1
 
 
+def test_peer_messages_never_crowd_out_the_users_own_turns(tmp_path):
+    rows = [user_text("task"), asst_text()]
+    for i in range(300):
+        rows += [user_text(f'<cross-session-message from="x">update {i}'
+                           '</cross-session-message>'), asst_text()]
+        if i % 100 == 50:
+            rows += [user_text("no, that's the wrong file"), asst_text(),
+                     user_text("The timer should start later."), asst_text()]
+    r = scan.score_session(write(tmp_path, rows))
+    kinds = [m["kind"] for m in r["moments"]]
+    assert (kinds.count("correction"), kinds.count("steer")) == (3, 3)
+    assert kinds.count("peer") == len(kinds) - 6 > 0
+
+
+def test_a_missing_coordination_log_is_skipped(tmp_path, capsys):
+    parent = write(tmp_path, [user_text("task"), asst_text()])
+    run = scan.score_run("s", [parent], coordination=[str(tmp_path / "none.jsonl")])
+    assert run["signals"]["coordination"] == 0
+    assert "skipped coordination log" in capsys.readouterr().err
+
+
 def test_notifications_give_each_subagent_its_cost_and_failures(tmp_path):
     parent_rows = [user_text("task"), asst_text(),
                    notice("a1", tokens=1000), notice("a2", tokens=1200),
@@ -337,6 +358,7 @@ def test_the_moment_budget_grows_with_length_up_to_a_limit():
     assert scan.moment_cap(4000) == 3 * scan.MOMENT_CAP
     assert scan.moment_cap(10**6) == scan.MOMENT_CAP_MAX
     assert scan.moment_cap(10**6, override=7) == 7
+    assert scan.moment_cap(10**6, override=0) == 0
 
 
 def test_spread_keeps_the_ends_and_never_exceeds_the_budget():

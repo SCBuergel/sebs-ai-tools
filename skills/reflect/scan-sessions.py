@@ -107,7 +107,9 @@ COORDINATION_KINDS = (
     r"stop|stall|quiet|invalid|duplicate|unresolved|revise|reject|block|dispute|"
     r"timeout|fail|lost|conflict|retry|abandon|error|expired|refus"
 )
-PRIORITY_KINDS = ("correction", "steer", "rework", "agent_failure", "peer")
+# Moment kinds filled in this order, tier by tier: the user's own turns first, then
+# scored agent friction, then peer messages, which are context and not scored.
+PRIORITY_TIERS = (("correction", "steer"), ("rework", "agent_failure"), ("peer",))
 
 
 def text_of(content):
@@ -166,7 +168,7 @@ def excerpt(s, n=160):
 
 def moment_cap(lines, override=None):
     """More room in longer transcripts, so a long session is not judged by its start."""
-    if override:
+    if override is not None:
         return override
     return min(MOMENT_CAP_MAX, MOMENT_CAP * max(1, math.ceil(lines / 1500)))
 
@@ -273,7 +275,8 @@ def score_session(path, moments_override=None):
                         n = notification(block)
                         if n["id"]:
                             previous = usage.get(n["id"], {})
-                            # Each notification repeats the totals so far: keep the latest.
+                            # Each notification repeats the totals so far: keep the latest fields
+                            # and the highest token count.
                             usage[n["id"]] = {
                                 **n,
                                 "tokens": max(n["tokens"] or 0, previous.get("tokens") or 0),
@@ -346,13 +349,15 @@ def score_session(path, moments_override=None):
         if c > CMD_REPEAT_MIN:
             anchors.append({"line": fl, "kind": "cmd_repeat",
                             "excerpt": f"{c}x {excerpt(cmd, 80)}"})
-    # Human and coordination moments first, since they are few and each is a real turn;
-    # errors fill what is left. Both are spread across the whole transcript, so a long
-    # session is not judged by its start.
+    # Fill the budget tier by tier (PRIORITY_TIERS), so many peer messages never crowd
+    # out the user's own turns; errors fill what is left. Each tier is spread across the
+    # whole transcript, so a long session is not judged by its start.
     room = max(0, moment_cap(lines, moments_override) - len(anchors))
-    priority.sort(key=lambda m: m["line"])
+    chosen = []
+    for tier in PRIORITY_TIERS:
+        group = sorted((m for m in priority if m["kind"] in tier), key=lambda m: m["line"])
+        chosen += spread(group, room - len(chosen))
     errors.sort(key=lambda m: m["line"])
-    chosen = spread(priority, room)
     chosen += spread(errors, room - len(chosen))
     moments = sorted(chosen + anchors, key=lambda m: m["line"])
     return {
@@ -400,7 +405,12 @@ def read_coordination(paths, kinds):
     pattern = re.compile(kinds, re.I)
     counts, by_agent, moments = {}, {}, []
     for path in paths:
-        with open(path, errors="replace") as fh:
+        try:
+            fh = open(path, errors="replace")
+        except OSError as e:
+            print(f"skipped coordination log {path}: {e}", file=sys.stderr)
+            continue
+        with fh:
             for ln, raw in enumerate(fh, 1):
                 try:
                     event = json.loads(raw)

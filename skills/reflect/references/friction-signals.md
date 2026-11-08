@@ -42,9 +42,10 @@ or `sed -n '<line>p' <session>`. A revisit or repeated-command anchor carries
 the line of its first occurrence, so every moment points at a real line.
 
 A transcript reports 20 moments per 1,500 lines, up to 120 (`--moments` sets a
-fixed number). The user's turns, rework, peer messages and failed agents come
-first, then errors; each group is spread evenly across the transcript, so a
-long session is not judged by its first hour. Run-level coordination moments
+fixed number). The budget is filled in order: the user's corrections and
+steers, then rework and failed agents, then peer messages, then errors, so a
+flood of peer messages never hides the user's own turns. Each group is spread
+evenly across the transcript, so a long session is not judged by its first hour. Run-level coordination moments
 are spread the same way, up to 60.
 
 Read flagged moments only. Reading whole transcripts is the cost the scan exists
