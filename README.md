@@ -32,7 +32,7 @@ with the same name, so you install only what you want.
 
 | Hook | What it does |
 | --- | --- |
-| `safe-bash` | Refuses Bash commands that find or kill processes by their full command line: `pkill -f` and `pgrep -f` (or `--full`), also inside `if`, loops, `sh -c` scripts and after wrappers such as `sudo` or `timeout`. The shell running such a command has the pattern in its own command line, so `pkill -f` kills that shell and the rest of the command's output is lost. The refusal tells the agent to kill by PID instead. It applies to every session once installed, including subagents and swarm agents. |
+| `safe-bash` | Refuses Bash commands that find or kill processes by their full command line: `pkill -f` and `pgrep -f` (or `--full`), also as an `if` or loop condition, inside `sh -c` scripts and `eval`, and after common wrappers such as `sudo`, `timeout` or `watch` (the list is not complete). A command line like that inside a heredoc is refused too, even one written to a file, since a heredoc may be a script. The shell running such a command has the pattern in its own command line, so `pkill -f` kills that shell and the rest of the command's output is lost. The refusal tells the agent to kill by PID instead. It applies to every session once installed, including subagents and swarm agents. |
 
 ## Install
 

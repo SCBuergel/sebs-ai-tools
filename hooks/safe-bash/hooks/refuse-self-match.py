@@ -15,15 +15,16 @@ COMMENT_RE = re.compile(r"(?:^|(?<=\s))#[^\n]*", re.M)
 # <<EOF, <<-'EOF', <<"EOF": the redirection; group 2 is the delimiter.
 HEREDOC_RE = re.compile(r"<<(-?)\s*['\"]?(\w+)['\"]?")
 DELIM_LINE = r"^\t*{}[ \t]*$"
-# A quoted script run by a shell is a command too.
-SHELL_C_RE = re.compile(r'\b(?:ba|z|da)?sh\s+-\w*c\w*\s+("(?:[^"\\]|\\.)*"|\'[^\']*\')')
+# A quoted script run by a shell or eval is a command too.
+SHELL_C_RE = re.compile(r'\b(?:(?:ba|z|da)?sh\s+-\w*c\w*|eval)\s+("(?:[^"\\]|\\.)*"|\'[^\']*\')')
 # pkill or pgrep in command position: at a line start, after a separator or a shell keyword,
 # after VAR=value assignments, or after a wrapper command (sudo -u me, timeout -s KILL 5, ...)
 # with whatever options it takes.
 CALL_RE = re.compile(
-    r"(?:^|[;&|(){}!`\n]|\$\(|\b(?:then|do|else|elif|time)\b)\s*"
+    r"(?:^|[;&|(){}!`\n]|\$\(|\b(?:if|while|until|then|do|else|elif|time|coproc)\b)\s*"
     r"(?:\w+=\S*\s+)*"
-    r"(?:(?:sudo|env|nice|ionice|nohup|exec|command|xargs|timeout|stdbuf|setsid|chrt)\b[^;&|\n]*?\s)?"
+    r"(?:(?:sudo|doas|env|nice|ionice|nohup|exec|command|eval|xargs|timeout|stdbuf|setsid|chrt|"
+    r"watch|flock|systemd-run|busybox)\b[^;&|\n]*?\s)?"
     r"(?:\S*/)?(pkill|pgrep)\b([^;&|\n)`}]*)",
     re.M,
 )

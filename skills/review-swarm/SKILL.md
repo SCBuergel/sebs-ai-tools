@@ -33,7 +33,9 @@ Roles, each a subagent started with the Agent tool from the briefs under
 - **Merge queue**: a process, not an agent (`board mergeq`). It rebases each
   approved change onto the integration branch `swarm-review`, runs the full
   test command on that exact commit, and fast-forwards. A conflict, a failed
-  test or a rebase that changed the code sends the card back to its dev.
+  test or a rebase that changed the code sends the card back to its dev. A
+  failed run is repeated once: tests that fail and then pass send it back as
+  `FLAKY`, to be fixed rather than merged.
 - **Dash** (optional): maintains the dashboards on the user's requests. The
   supervisor forwards each request verbatim as `DASH REQUEST: ...`; a reply
   ending in `NEEDS FROM SUPERVISOR:` asks for an event the log does not carry

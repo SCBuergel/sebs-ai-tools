@@ -111,7 +111,7 @@ py = json.load(open(f"{s}/swarm.json")).get("py")
 interp = (f"`$SW/py` (it runs `{py}`). Use it, from your tree's root, for every Python command: probes, "
           "scripts, one-off checks. Never hunt for another interpreter or virtualenv" if py else
           "none recorded; use what the repository guide names, and ask the supervisor once if a probe needs more")
-p = re.sub(r"(Interpreter: ).*", lambda m: m.group(1) + interp + ".", p.replace("{{PY}}", interp + "."))
+p = re.sub(r"(Interpreter: ).*", lambda m: m.group(1) + interp + ".", p)  # also fills {{PY}}
 open(f"{s}/PROTOCOL.md", "w").write(p)
 if py:  # a rerun with --py replaces the wrapper
     open(f"{s}/py", "w").write("#!/bin/sh\n# The project's interpreter for every agent (swarm-init --py).\n"
