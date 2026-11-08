@@ -157,5 +157,5 @@ board:        $swarm/board tick      $swarm/board show      merge queue: python3
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
 allow rules:  for agents to run without permission prompts, the user may add (this script changes no settings):
               Bash($swarm/tlock:*)  Bash($swarm/board:*)  Bash($swarm/ev:*)  Bash(python3 $swarm/board:*)
-              Bash(git worktree add:*)  Bash(git worktree remove:*)
+              Bash(git worktree add $swarm/:*)  Bash(git worktree remove $swarm/:*)
 EOF

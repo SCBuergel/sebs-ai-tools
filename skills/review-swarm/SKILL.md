@@ -70,8 +70,9 @@ tear down.
   nobody answers ends an agent's turn, and a refused one ends a review round
   without a verdict. `swarm-init` prints the allow rules a swarm needs, with
   `$SW` filled in: `Bash(<SW>/tlock:*)`, `Bash(<SW>/board:*)`,
-  `Bash(<SW>/ev:*)`, `Bash(python3 <SW>/board:*)`, `Bash(git worktree add:*)`
-  and `Bash(git worktree remove:*)`. Show them to the user, who can add them
+  `Bash(<SW>/ev:*)`, `Bash(python3 <SW>/board:*)`, and, for the
+  commit-reviewers' test worktrees under the swarm folder only,
+  `Bash(git worktree add <SW>/:*)` and `Bash(git worktree remove <SW>/:*)`. Show them to the user, who can add them
   with `/permissions` or to the project's `.claude/settings.local.json`.
   Never edit the user's settings yourself.
 

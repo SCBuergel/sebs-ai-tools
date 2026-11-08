@@ -106,16 +106,64 @@ def test_an_import_only_conflict_is_resolved_and_merged(tmp_path, monkeypatch):
     assert "only import lines changed; the approval stands" in (sw / "events.jsonl").read_text()
 
 
-def test_a_non_import_difference_after_a_rebase_goes_back(tmp_path, monkeypatch):
+def test_a_rebase_that_changes_only_the_context_goes_back(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    repo, sw = init_swarm(tmp_path, "true")
+    body = "def g(x):\n    y = 1\n    z = 2\n    return x\n"
+    (repo / "src" / "m.py").write_text(body)
+    git("commit", "-qam", "four lines", cwd=repo)
+    git("checkout", "-q", "-B", "swarm-dev1", "swarm-review", cwd=sw / "dev1")
+    sha = set_line(sw, "src/m.py", body.replace("return x", "return check(x)"), "[R1-1] check")
+    # another change renames g, two lines away: no conflict, but the approved change's context moved
+    advance_review(repo, body.replace("def g", "def h"))
+    board = load_board(sw)
+    why = board.merge_one({"id": "R1-1", "sha": sha}, board.cfg())
+    assert why and why.startswith("the rebase changed the approved change")
+
+
+def test_an_import_conflict_that_rebinds_a_name_goes_back(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    repo, sw = init_swarm(tmp_path, "true")
+    sha = set_line(sw, "src/m.py", "from b import f\nX = 1\n", "[R1-1] b.f")
+    advance_review(repo, "from c import f\nX = 1\n")
+    board = load_board(sw)
+    assert board.merge_one({"id": "R1-1", "sha": sha}, board.cfg()).startswith("rebase conflict")
+
+
+SORT = "python3 -c \"import sys; p='src/m.py'; l=open(p).read().splitlines(True); i=[x for x in l if x.startswith('import ')]; open(p,'w').write(''.join(sorted(i)+[x for x in l if x not in i]))\""
+
+
+@pytest.mark.parametrize("fix,expect", [(SORT, "import os\nimport sys\nX = 1\n"), ("exit 1", None)])
+def test_the_import_sorter_runs_after_a_resolution_and_must_pass(tmp_path, monkeypatch, fix, expect):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    repo, sw = init_swarm(tmp_path, "true", "--import-fix", fix)
+    sha = set_line(sw, "src/m.py", "import os\nX = 1\n", "[R1-1] use os")
+    advance_review(repo, "import sys\nX = 1\n")
+    board = load_board(sw)
+    why = board.merge_one({"id": "R1-1", "sha": sha}, board.cfg())
+    if expect:
+        assert why is None and (sw / "merge" / "src" / "m.py").read_text() == expect
+    else:
+        assert why.startswith("the import sorter failed (rc=1)")
+
+
+@pytest.mark.parametrize("args", [("--clean-below", "Severe"), ("--max-passes", "many")])
+def test_swarm_init_refuses_a_bad_pass_option(tmp_path, args):
+    with pytest.raises(subprocess.CalledProcessError):
+        init_swarm(tmp_path, "true", *args)
+
+
+def test_change_without_imports_keeps_every_other_line(tmp_path, monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)
     repo, sw = init_swarm(tmp_path, "true")
     board = load_board(sw)
     sha = set_line(sw, "src/m.py", "import os\nX = 1\n", "[R1-1] use os")
     old = git("rev-parse", "swarm-review", cwd=repo)
-    assert board.change_without_imports(str(sw / "dev1"), old, sha) == [
-        "--- a/src/m.py", "+++ b/src/m.py"]
+    lines = board.change_without_imports(str(sw / "dev1"), old, sha)
+    assert "+import os" not in lines and " X = 1" in lines
     sha2 = set_line(sw, "src/m.py", "import os\nX = 9\n", "[R1-1] and more")
-    assert board.change_without_imports(str(sw / "dev1"), old, sha2)[2:] == ["-X = 1", "+X = 9"]
+    assert ["-X = 1", "+X = 9"] == [l for l in board.change_without_imports(str(sw / "dev1"), old, sha2)
+                                    if l[:1] in "+-" and not l.startswith(("+++", "---"))]
 
 
 def test_any_other_conflict_goes_back(tmp_path, monkeypatch):

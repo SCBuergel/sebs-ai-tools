@@ -666,6 +666,29 @@ def only_imports(lines):
     return all(not l.strip() or IMPORT_RE.fullmatch(l) for l in lines)
 
 
+def bound_names(line):
+    """{name: the import line binding it} for one import line."""
+    line = line.strip().rstrip(";")
+    if line.startswith("from "):
+        parts = line.split(" import ", 1)[1].split(",")
+    elif line.startswith("import ") and " from " in line:  # JS/TS
+        parts = re.findall(r"(\w+(?:\s+as\s+\w+)?)", line.split(" from ", 1)[0][len("import "):])
+    else:
+        parts = [p if " as " in p else p.strip().split(".")[0] for p in line[len("import "):].split(",")]
+    names = {p.split(" as ")[-1].strip() for p in parts} - {"*", "type", ""}
+    return {n: line for n in names}
+
+
+def clashes(ours, theirs):
+    """A name both sides import from different places: keeping both lines would silently rebind it."""
+    a, b = {}, {}
+    for l in ours:
+        a.update(bound_names(l) if l.strip() else {})
+    for l in theirs:
+        b.update(bound_names(l) if l.strip() else {})
+    return any(n in b and b[n] != a[n] for n in a)
+
+
 def resolve_imports(wt, files):
     """Resolve conflicts that are only in import lines by keeping both sides. False if any is not."""
     for name in files:
@@ -675,7 +698,8 @@ def resolve_imports(wt, files):
         except (OSError, UnicodeDecodeError):
             return False
         blocks = CONFLICT_RE.findall(body)
-        if not blocks or any(not only_imports((a + b).splitlines()) for a, b in blocks):
+        if not blocks or any(not only_imports((a + b).splitlines()) or clashes(a.splitlines(), b.splitlines())
+                             for a, b in blocks):
             return False
 
         def union(m):
@@ -689,10 +713,12 @@ def resolve_imports(wt, files):
 
 
 def change_without_imports(cwd, a, b):
-    """The change a..b with import lines left out, to compare two versions of one change."""
-    d = subprocess.run(["git", "-C", cwd, "diff", "-U0", a, b], capture_output=True, text=True).stdout
-    return [l for l in d.splitlines() if l.startswith(("+++", "---"))
-            or (l[:1] in "+-" and l[1:].strip() and not IMPORT_RE.fullmatch(l[1:]))]
+    """The change a..b with its context, minus import lines and hunk positions: two versions of one
+    change that differ only in imports compare equal, and any other difference, also in the
+    surrounding code, does not."""
+    d = subprocess.run(["git", "-C", cwd, "diff", a, b], capture_output=True, text=True).stdout
+    return [l for l in d.splitlines() if not l.startswith(("@@", "index "))
+            and not (l[:1] in " +-" and not l.startswith(("+++", "---")) and IMPORT_RE.fullmatch(l[1:]))]
 
 
 def patch_id(cwd, a, b):
@@ -740,7 +766,10 @@ def merge_one(f, c):
         run("rebase", "--abort")
         return f"rebase of {sha[:9]} onto {old[:9]} did not finish"
     if resolved and c.get("import_fix_cmd"):
-        subprocess.run(["bash", "-c", c["import_fix_cmd"]], cwd=wt, capture_output=True)
+        fix = subprocess.run(["bash", "-c", c["import_fix_cmd"]], cwd=wt, capture_output=True, text=True)
+        if fix.returncode:
+            return (f"the import sorter failed (rc={fix.returncode}) after resolving an import conflict on "
+                    f"{old[:9]}: rebase yourself, get it re-approved, resubmit. {fix.stdout[-200:]}")
         if run("status", "--porcelain").stdout.strip():
             run("commit", "-qa", "--amend", "--no-edit")
     head = git("rev-parse", "HEAD", cwd=wt)
