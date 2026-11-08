@@ -10,6 +10,11 @@ import json
 import re
 import sys
 
+QUOTED_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\'[^\']*\'')
+COMMENT_RE = re.compile(r"(?:^|(?<=\s))#[^\n]*", re.M)
+# <<EOF, <<-'EOF', <<"EOF": the redirection; group 2 is the delimiter.
+HEREDOC_RE = re.compile(r"<<(-?)\s*['\"]?(\w+)['\"]?")
+DELIM_LINE = r"^\t*{}[ \t]*$"
 # A quoted script run by a shell is a command too.
 SHELL_C_RE = re.compile(r'\b(?:ba|z|da)?sh\s+-\w*c\w*\s+("(?:[^"\\]|\\.)*"|\'[^\']*\')')
 # pkill or pgrep in command position: at a line start, after a separator or a shell keyword,
@@ -30,36 +35,63 @@ REASON = ("Refused: `{call}` matches the full command line of every process, inc
 
 
 def visible(text, i=0, stop=None):
-    """What the shell runs as commands: quoted literals dropped, command substitutions kept,
-    also inside double quotes and however their own quotes nest. Returns (text, next index)."""
+    """What the shell runs as commands: quoted literals, comments and heredoc bodies dropped,
+    command substitutions kept, also inside double quotes and however their own quotes nest.
+    A quote that never closes is not a quote: the text after it stays visible, so a stray
+    apostrophe cannot hide a later command. Returns (text, next index)."""
     out = []
     while i < len(text):
         c = text[i]
         if stop and c == stop:
             return "".join(out), i + 1
+        word_start = i == 0 or text[i - 1] in " \t\n;&|()"
         if c == "\\":
             out.append(" ")
             i += 2
+        elif c == "#" and word_start:
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif text.startswith("<<", i) and not text.startswith("<<<", i):
+            m = HEREDOC_RE.match(text, i)
+            if not m:
+                out.append(c)
+                i += 1
+                continue
+            out.append(text[i:m.end()])
+            # the body runs from the next line to a line holding only the delimiter
+            line_end = text.find("\n", m.end())
+            body = DELIM_LINE.format(re.escape(m.group(2)))
+            close = re.compile(body, re.M).search(text, line_end + 1) if line_end >= 0 else None
+            i = len(text) if line_end < 0 else (close.end() if close else len(text))
+            if line_end >= 0:
+                out.append(visible(text[m.end():line_end])[0] + "\n")
         elif c == "'":
             end = text.find("'", i + 1)
-            i = len(text) if end < 0 else end + 1
-            out.append('""')
+            if end < 0:
+                out.append(" ")
+                i += 1
+            else:
+                out.append('""')
+                i = end + 1
         elif c == '"':
-            i += 1
-            out.append('"')
-            while i < len(text) and text[i] != '"':
-                if text[i] == "\\":
-                    i += 2
-                elif text.startswith("$(", i):
-                    inner, i = visible(text, i + 2, ")")
-                    out.append(f"$({inner})")
-                elif text[i] == "`":
-                    inner, i = visible(text, i + 1, "`")
-                    out.append(f"`{inner}`")
+            j, kept = i + 1, []
+            while j < len(text) and text[j] != '"':
+                if text[j] == "\\":
+                    j += 2
+                elif text.startswith("$(", j):
+                    inner, j = visible(text, j + 2, ")")
+                    kept.append(f"$({inner})")
+                elif text[j] == "`":
+                    inner, j = visible(text, j + 1, "`")
+                    kept.append(f"`{inner}`")
                 else:
-                    i += 1
-            out.append('"')
-            i += 1
+                    j += 1
+            if j >= len(text):  # never closed
+                out.append(" ")
+                i += 1
+            else:
+                out.append('"' + "".join(kept) + '"')
+                i = j + 1
         elif text.startswith("$(", i) or c == "(":
             inner, i = visible(text, i + (2 if c == "$" else 1), ")")
             out.append(f"{'$' if c == '$' else ''}({inner})")
@@ -73,8 +105,11 @@ def visible(text, i=0, stop=None):
 
 
 def commands(command):
-    """The commands in a Bash call, plus each quoted `sh -c` script."""
+    """The commands in a Bash call, read two ways: by the scanner above, and with only
+    complete quoted strings blanked. A refusal needs either to see the call, so a case one
+    of them misreads is still caught by the other. Plus each quoted `sh -c` script."""
     yield visible(command)[0]
+    yield QUOTED_RE.sub('""', COMMENT_RE.sub("", command))
     for m in SHELL_C_RE.finditer(command):
         yield from commands(m.group(1)[1:-1])
 

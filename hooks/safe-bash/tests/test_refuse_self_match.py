@@ -48,6 +48,14 @@ def run(command, tool="Bash"):
     'echo "pid: $(pgrep -f "dash.py")"',
     'kill $(pgrep -fa "18765|board")',
     'echo "$( (cd /tmp; pkill -f x) )"',
+    "# stop the server, it's stuck\npkill -f server",
+    "ls  # don't care\npgrep -f x",
+    "cat <<EOF > f\nit's\nEOF\npkill -f x",
+    "cat <<'EOF' > f\nit's 'quoted'\nEOF\npkill -f x",
+    "echo it's\npkill -f x",
+    'echo "unclosed\npkill -f x',
+    # a heredoc body may be a script (bash <<EOF): a command line in it is refused too
+    "bash <<EOF\npkill -f x\nEOF",
 ])
 def test_refuses_a_full_command_line_match(command):
     r = run(command)
@@ -73,6 +81,8 @@ def test_refuses_a_full_command_line_match(command):
     "echo '$(pkill -f x)'",  # single quotes: no substitution runs
     'echo "a \\"; pkill -f b"',  # an escaped quote stays inside the string
     "printf '%s' \"it's\" && pgrep -x x",
+    "# never use pkill -f here\nls",
+    "git log --grep='#1' && ls",
 ])
 def test_lets_everything_else_through(command):
     r = run(command)
