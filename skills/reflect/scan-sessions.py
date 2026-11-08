@@ -77,9 +77,24 @@ READ_CMD_RE = re.compile(
 STRICT_ERROR_RE = re.compile(
     r"^(exit code [1-9]\d*|error[:\[ ]|fatal:|traceback \(most recent|"
     r"<tool_use_error>|[^\n]*hook error:|[^\n]*: command not found|"
-    r"[^\n]*: no such file or directory|failed to |cannot )",
+    r"[^\n]*: no such file or directory|failed to |cannot |"
+    # lint summaries: ruff/flake8 "Found 2 errors.", eslint "✖ 3 problems", black/ruff format
+    r"found [1-9]\d* errors?\b|(✖\s*)?[1-9]\d* problems?\b|would reformat\b)",
     re.I | re.M,
 )
+# A bare nonzero exit that only means "nothing found" or "differs" for these commands
+# (grep/rg/diff/test exit 1, ls exit 2 on a missing path): a deliberate probe, not a failure.
+QUIET_EXIT = {"grep": 1, "egrep": 1, "fgrep": 1, "rg": 1, "diff": 1, "test": 1, "[": 1,
+              "ls": 2}
+EXIT_RE = re.compile(r"^exit code (\d+)", re.I)
+# A test runner's result: a failure may be one the agent caused on purpose (a mutation
+# check), so it stays counted but carries a tag the reader can weigh.
+TEST_CMD_RE = re.compile(r"\b(pytest|py\.test|cargo\s+test|go\s+test|npm\s+(run\s+)?test|"
+                         r"yarn\s+test|pnpm\s+test|just\s+test|make\s+test|tox|nox|tlock)\b")
+# In a subagent's transcript, a message from another agent that asks for another round.
+REWORK_RE = re.compile(
+    r"\b(NOT APPROVED|REVISE|REWORK|REDO|refused?|rejected|conflict|"
+    r"fix (it|this|that|the)|try again|still (fails|wrong|broken))\b", re.I)
 SHORT_RESULT = 600  # the loose error lexicon counts only in a short result
 CORRECTION_RE = re.compile(
     # "no," / "no." stand alone: a trailing \b would never follow the punctuation.
@@ -98,6 +113,8 @@ INJECTED_RE = re.compile(
     r"cross-session-message|teammate-message)(\s[^>]*)?>"
 )
 PEER_RE = re.compile(r"<(cross-session-message|teammate-message)\b")
+# A message from another agent of the same session (a subagent's own reviewer, a lead).
+AGENT_MSG_RE = re.compile(r"<agent-message\b")
 # The harness reports each subagent's end, with its usage, in the parent's transcript.
 NOTIFICATION_RE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
 MOMENT_CAP = 20  # flagged moments reported per transcript of up to 1500 lines
@@ -138,8 +155,27 @@ def is_tool_result(content):
     )
 
 
+def last_program(command):
+    """The program whose exit status a shell command reports: the last one in its pipeline."""
+    tail = re.split(r"\|\||&&|[|;\n]", command or "")[-1].split()
+    while tail and re.match(r"^\w+=", tail[0]):  # VAR=value prefixes
+        tail = tail[1:]
+    return os.path.basename(tail[0]) if tail else None
+
+
+def is_quiet_exit(text, command):
+    """A nonzero exit that a probe like grep or ls reports for "nothing found"."""
+    m = EXIT_RE.match(text.strip())
+    if not m:
+        return False
+    expected = QUIET_EXIT.get(last_program(command))
+    return expected is not None and int(m.group(1)) == expected
+
+
 def is_error_result(text, tool_name, command):
     """True when a tool result shows the call itself failed."""
+    if tool_name == "Bash" and is_quiet_exit(text, command):
+        return False
     if STRICT_ERROR_RE.search(text):
         return True
     if tool_name in READ_TOOLS:
@@ -206,7 +242,9 @@ def notification(text):
     }
 
 
-def score_session(path, moments_override=None):
+def score_session(path, moments_override=None, seen_uuids=None):
+    """Signals and moments of one transcript. seen_uuids: entries an earlier member of the
+    run already counted (a continuation repeats its parent's turns); updated in place."""
     reads = {}       # revisit target (file / search / page) -> [count, first_line]
     cmds = {}        # command -> [count, first_line]
     tool_total = 0
@@ -215,8 +253,9 @@ def score_session(path, moments_override=None):
     corr_hits = []   # (line, excerpt)
     steer_hits = []  # (line, excerpt): human turns without the correction lexicon
     rework_hits = [] # (line, excerpt): a parent's follow-up to this subagent
-    peer_hits = []   # (line, excerpt): messages from other sessions
-    usage = {}       # subagent id -> latest notification, with its line
+    peer_hits = []   # (line, excerpt): messages from other sessions or agents
+    peer_seen = set()  # one message is logged several times (queued, then delivered)
+    usage = {}       # subagent id -> totals over its notifications, with the latest line
     sidechain = "/subagents/" in path.replace(os.sep, "/")
     seen_assistant = False  # a correction is a human turn that follows agent action
     lines = 0
@@ -227,6 +266,29 @@ def score_session(path, moments_override=None):
             e[0] += 1
         else:
             d[key] = [1, ln]
+
+    def note_peer(entry, origin, text, ln):
+        origin = origin if isinstance(origin, dict) else {}
+        key = origin.get("msg_id") or re.sub(r"\s+", " ", text)[:400]
+        if key not in peer_seen:
+            peer_seen.add(key)
+            peer_hits.append((ln, excerpt(text)))
+
+    def add_usage(n, ln):
+        # Tokens are cumulative over a subagent's rounds; tool uses and duration cover only
+        # the round that just ended, so they add up. A repeated notice of one round (same
+        # tokens) is not a new round.
+        u = usage.get(n["id"])
+        if u is None:
+            usage[n["id"]] = {**n, "tool_uses": n["tool_uses"] or 0,
+                              "duration_ms": n["duration_ms"] or 0, "rounds": 1, "line": ln}
+            return
+        if n["tokens"] is not None and n["tokens"] == u["tokens"]:
+            return
+        u.update(status=n["status"], line=ln, rounds=u["rounds"] + 1,
+                 tokens=max(n["tokens"] or 0, u["tokens"] or 0),
+                 tool_uses=u["tool_uses"] + (n["tool_uses"] or 0),
+                 duration_ms=u["duration_ms"] + (n["duration_ms"] or 0))
 
     with open(path, errors="replace") as fh:
         for ln, raw in enumerate(fh, 1):
@@ -241,9 +303,22 @@ def score_session(path, moments_override=None):
             if not isinstance(o, dict):
                 continue
             sidechain = sidechain or bool(o.get("isSidechain"))
+            if seen_uuids is not None and o.get("uuid"):
+                if o["uuid"] in seen_uuids:
+                    continue
+                seen_uuids.add(o["uuid"])
             typ = o.get("type")
             msg = o.get("message")
             content = msg.get("content") if isinstance(msg, dict) else None
+
+            if typ == "attachment":
+                # A message queued while the agent worked arrives as an attachment.
+                att = o.get("attachment")
+                if isinstance(att, dict) and isinstance(att.get("prompt"), str):
+                    t = att["prompt"]
+                    if PEER_RE.search(t):
+                        note_peer(o, att.get("origin"), t, ln)
+                continue
 
             if typ == "assistant":
                 seen_assistant = True
@@ -268,22 +343,25 @@ def score_session(path, moments_override=None):
                                    if isinstance(b, dict) and b.get("type") == "tool_result"), None)
                     name, command = tools.get(use_id, (None, None))
                     if is_error_result(t, name, command):
-                        err_hits.append((ln, excerpt(t)))
+                        test_run = name == "Bash" and bool(TEST_CMD_RE.search(command or ""))
+                        err_hits.append((ln, excerpt(t), test_run))
                 elif is_injected(o, raw):
                     t = text_of(content)
-                    for block in NOTIFICATION_RE.findall(t):
+                    origin = o.get("origin") if isinstance(o.get("origin"), dict) else {}
+                    notified = NOTIFICATION_RE.findall(t)
+                    for block in notified:
                         n = notification(block)
                         if n["id"]:
-                            previous = usage.get(n["id"], {})
-                            # Each notification repeats the totals so far: keep the latest fields
-                            # and the highest token count.
-                            usage[n["id"]] = {
-                                **n,
-                                "tokens": max(n["tokens"] or 0, previous.get("tokens") or 0),
-                                "line": ln,
-                            }
-                    if PEER_RE.search(t):
-                        peer_hits.append((ln, excerpt(t)))
+                            add_usage(n, ln)
+                    if notified or t.startswith("[SYSTEM NOTIFICATION"):
+                        continue  # the harness reporting, not an agent asking
+                    if PEER_RE.search(t) or AGENT_MSG_RE.search(t) or origin.get("kind") == "peer":
+                        note_peer(o, origin, t, ln)
+                        if sidechain and REWORK_RE.search(t):
+                            rework_hits.append((ln, excerpt(t)))
+                    elif sidechain and origin.get("kind") and REWORK_RE.search(t):
+                        # e.g. a lead agent's "REVISE R4-2"; a new assignment is not rework
+                        rework_hits.append((ln, excerpt(t)))
                 elif seen_assistant:
                     t = text_of(content)
                     if not t:
@@ -336,7 +414,8 @@ def score_session(path, moments_override=None):
             for n in failures
         ]
     )
-    errors = as_moments(err_hits, "error")
+    errors = [{"line": line, "kind": "error", "excerpt": text, **({"tag": "test_run"} if t else {})}
+              for line, text, t in err_hits]
     # busiest revisit / repeated command, each anchored to its first occurrence.
     # These drive read_repeats/cmd_repeats in the score, so they always survive
     # the cap; only the error/correction hits are trimmed to fit.
@@ -441,9 +520,10 @@ def read_coordination(paths, kinds):
 
 def score_run(key, files, coordination=(), kinds=COORDINATION_KINDS, moments_override=None):
     members = []
-    for f in sorted(files):
+    seen_uuids = set()  # a continuation repeats its parent's entries: count each once
+    for f in sorted(files, key=lambda f: (os.path.getmtime(f), f)):
         try:
-            member = score_session(f, moments_override)
+            member = score_session(f, moments_override, seen_uuids)
         except OSError as e:
             print(f"skipped {f}: {e}", file=sys.stderr)
             continue
@@ -465,14 +545,18 @@ def score_run(key, files, coordination=(), kinds=COORDINATION_KINDS, moments_ove
         if agent and agent["finished"] is False:
             moments.append({"file": member["session"], "line": 1, "kind": "unfinished",
                             "excerpt": f"{agent['type']}: {agent['description']}"})
+    # Rank cost per round, so an agent resumed many times is not an outlier for living long.
     spent = [n for n in usage.values() if n.get("tokens")]
     if len(spent) >= 3:
-        middle = statistics.median(n["tokens"] for n in spent)
-        heavy = sorted(spent, key=lambda n: -n["tokens"])[:3]
+        def per_round(n):
+            return n["tokens"] / max(1, n.get("rounds") or 1)
+        middle = statistics.median(per_round(n) for n in spent)
+        heavy = sorted(spent, key=lambda n: -per_round(n))[:3]
         for n in heavy:
-            if n["tokens"] > 2 * middle:
+            if per_round(n) > 2 * middle:
                 moments.append({"file": n["file"], "line": n["line"], "kind": "cost",
-                                "excerpt": f"subagent {n['id']}: {n['tokens']} tokens, "
+                                "excerpt": f"subagent {n['id']}: {int(per_round(n))} tokens per "
+                                           f"round over {n.get('rounds')} rounds, "
                                            f"{n.get('tool_uses')} tool calls, "
                                            f"{n.get('duration_ms')} ms (median {int(middle)})"})
 

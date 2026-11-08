@@ -71,9 +71,9 @@
       "source": "./skills/reflect",
       "strict": false,
       "skills": ["./"],
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Retrospective over agent sessions, including long multi-agent runs: scores friction deterministically across a session and its subagents, then proposes most-severe-first fixes to the environment, skills and workflows. Proposes only.",
-      "author": { "name": "Tibor (Teebor-Choka), extended by Sebastian C. Bürgel" },
+      "author": { "name": "Teebor-Choka, extended by Sebastian C. Bürgel" },
       "license": "MIT"
     }
   ]

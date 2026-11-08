@@ -9,7 +9,7 @@ Two modes run on one engine: a **single** run (default), or **cross-session** ov
 
 ## Steps
 
-1. **Proposals are pointers.** Any file you later propose (an `AGENTS.md` line, a skill edit, a check) should state what it is and when it fires, stay short, and push detail behind the pointer; prefer a check that can fail over a sentence. For a new skill or steering file, Tibor's `agent-extension-author` skill (plugin `agent-extension-author@kauki-skills`, from Teebor-Choka/skills) is the fuller guide, if it is installed.
+1. **Proposals are pointers.** Any file you later propose (an `AGENTS.md` line, a skill edit, a check) should state what it is and when it fires, stay short, and push detail behind the pointer; prefer a check that can fail over a sentence. For a new skill or steering file, Teebor-Choka's `agent-extension-author` skill (plugin `agent-extension-author@kauki-skills`, from Teebor-Choka/skills) is the fuller guide, if it is installed.
 
 2. **Fix mode and scope.**
    - Single (default): the current session, or a transcript the user names. Session logs live in `~/.claude/projects/<cwd-slug>/<uuid>.jsonl` (the slug is the working directory with `/` rewritten to `-`), and the subagents it started in `<uuid>/subagents/`. Pass the project folder or both paths: the scan joins them into one run.
@@ -51,7 +51,7 @@ The leading idea: a new rule goes where it is read when it is needed, not into a
 - **The check beats the sentence.** Default to building the deterministic check over writing a rule. A check fails; a sentence in a standards file cannot.
 - **These are the only homes:** a skill or workflow step, an `AGENTS.md` pointer, a deterministic check, a tool or MCP change, a widening of access. Memory is out of scope. Write a memory file only if the user asks for one this run.
 - **Propose only.** No edits, no hooks installed, no commits. The user picks what becomes permanent.
-- **Know who spoke.** In a subagent's transcript the "user" is the agent that started it; its follow-ups are `rework`, never the user's corrections. Messages from other sessions are `peer`. Attribute a finding to the user only from a `steer` or `correction` in a main transcript.
+- **Know who spoke.** In a subagent's transcript the "user" is the agent that started it; its follow-ups, and other agents' revision requests, are `rework`, never the user's corrections. Messages from other sessions or agents are `peer`. Attribute a finding to the user only from a `steer` or `correction` in a main transcript.
 
 ## The three roles
 

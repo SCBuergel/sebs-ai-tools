@@ -383,3 +383,131 @@ def test_cli_table_and_json_cover_runs(tmp_path, capsys):
     _sys.argv = ["scan-sessions.py", parent, other, "--coordination", other]
     assert scan.main() == 2
 
+
+
+# --- signals sharpened by the 2026-11 swarm retrospective -------------------
+
+def bash_result(command, result):
+    return [{"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t", "name": "Bash", "input": {"command": command}}]}},
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t", "content": result}]}}]
+
+
+@pytest.mark.parametrize("command,result", [
+    ("grep -n missing src/*.py", "Exit code 1"),
+    ("cd repo && git ls-files | rg -l TODO", "Exit code 1"),
+    ("diff a.txt b.txt", "Exit code 1\n1c1\n< a\n---\n> b"),
+    ("test -f build/out", "Exit code 1"),
+    ("ls /tmp/cleaned", "Exit code 2\nls: cannot access '/tmp/cleaned': No such file or directory"),
+])
+def test_a_probe_that_finds_nothing_is_not_an_error(tmp_path, command, result):
+    r = scan.score_session(write(tmp_path, bash_result(command, result)))
+    assert r["signals"]["errors"] == 0
+
+
+@pytest.mark.parametrize("command,result", [
+    ("grep -n x f", "Exit code 2\ngrep: f: No such file or directory"),
+    ("ls missing", "Exit code 1"),
+    ("make build", "Exit code 1"),
+])
+def test_other_nonzero_exits_still_count(tmp_path, command, result):
+    r = scan.score_session(write(tmp_path, bash_result(command, result)))
+    assert r["signals"]["errors"] == 1
+
+
+def test_a_failed_test_run_is_counted_and_tagged(tmp_path):
+    rows = bash_result("python -m pytest -k race", "Exit code 1\n1 failed, 40 deselected")
+    r = scan.score_session(write(tmp_path, rows))
+    assert [(m["kind"], m.get("tag")) for m in r["moments"]] == [("error", "test_run")]
+
+
+@pytest.mark.parametrize("result", [
+    "src/a.py:3:1: F401 unused import\nFound 2 errors.",
+    "Would reformat: src/a.py\n1 file would be reformatted",
+    "✖ 3 problems (3 errors, 0 warnings)",
+])
+def test_a_lint_summary_is_an_error(tmp_path, result):
+    r = scan.score_session(write(tmp_path, bash_result("ruff check . && git commit -m x", result)))
+    assert r["signals"]["errors"] == 1
+
+
+def test_a_clean_lint_summary_is_not(tmp_path):
+    r = scan.score_session(write(tmp_path, bash_result("ruff check .", "Found 0 errors.\n")))
+    assert r["signals"]["errors"] == 0
+
+
+def peer_attachment(msg_id, text):
+    return {"type": "attachment", "attachment": {
+        "type": "queued_command", "prompt": f'<cross-session-message from="x">{text}'
+                                            "</cross-session-message>",
+        "origin": {"kind": "peer", "msg_id": msg_id}}}
+
+
+def test_queued_peer_messages_count_once_each(tmp_path):
+    rows = [user_text("task"), asst_text(),
+            {"type": "queue-operation", "operation": "enqueue",
+             "content": '<cross-session-message from="x">one</cross-session-message>'},
+            peer_attachment("m1", "one"), asst_text(),
+            peer_attachment("m2", "two"),
+            {"type": "user", "isMeta": True, "origin": {"kind": "peer", "msg_id": "m2"},
+             "message": {"content": 'Another Claude session sent a message:\n'
+                                    '<cross-session-message from="x">two</cross-session-message>'}}]
+    r = scan.score_session(write(tmp_path, rows))
+    assert r["signals"]["peer_messages"] == 2
+    assert r["signals"]["corrections"] + r["signals"]["steers"] == 0
+
+
+def meta_message(text, kind):
+    return {"type": "user", "isMeta": True, "isSidechain": True, "origin": {"kind": kind},
+            "message": {"content": text}}
+
+
+def test_in_a_subagent_revision_requests_from_other_agents_are_rework(tmp_path):
+    rows = sub_rows() + [
+        meta_message("The coordinator sent a message while you were working:\nIMPLEMENT R7-2",
+                     "coordinator"), asst_text(),
+        meta_message("The coordinator sent a message while you were working:\nREVISE R7-2: "
+                     "the merge queue refused it", "coordinator"), asst_text(),
+        meta_message('<agent-message from="a6">NOT APPROVED a..b\n- x.py:3</agent-message>',
+                     "peer"), asst_text(),
+        meta_message('<agent-message from="a6">APPROVED a..b</agent-message>', "peer"),
+        meta_message("[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification><task-id>b1"
+                     "</task-id><status>failed</status></task-notification>",
+                     "task-notification"),
+    ]
+    _, subs = make_run(tmp_path, [user_text("task")], {
+        "a1": (rows, {"agentType": "dev", "description": "dev1", "finished": True})})
+    r = scan.score_session(subs[0])
+    assert r["signals"]["reworks"] == 2
+    assert r["signals"]["peer_messages"] == 2
+    rework = [m["excerpt"] for m in r["moments"] if m["kind"] == "rework"]
+    assert "REVISE R7-2" in rework[0] and "NOT APPROVED" in rework[1]
+
+
+def test_a_continuation_does_not_count_its_parents_turns_twice(tmp_path):
+    turn = user_text("no, that's the wrong file", uuid="u1")
+    first = write(tmp_path, [user_text("task", uuid="u0"), asst_text(), turn], "first.jsonl")
+    again = write(tmp_path, [user_text("task", uuid="u0"), asst_text(), turn, asst_text(),
+                             user_text("actually, use the other one", uuid="u2")],
+                  "second.jsonl")
+    run = scan.score_run("run", [first, again])
+    assert run["signals"]["corrections"] == 2
+
+
+def test_cost_is_ranked_per_round(tmp_path):
+    parent_rows = [user_text("task"), asst_text()]
+    for agent_id in ("a1", "a2", "a3"):
+        parent_rows.append(notice(agent_id, tokens=1000, tools=5, ms=100))
+    for i in range(1, 9):  # a long-lived agent: 8 rounds of 1000 tokens each
+        parent_rows.append(notice("lead", tokens=1000 * i, tools=2, ms=100))
+    parent_rows.append(notice("hog", tokens=5000, tools=1, ms=100))
+    meta = {"agentType": "x", "description": "x", "finished": True}
+    make_run(tmp_path, parent_rows,
+             {a: (sub_rows(), meta) for a in ("a1", "a2", "a3", "lead", "hog")})
+    run = scan.score_run("sess", scan.collect([str(tmp_path)]))
+    by_id = {m["agent"]["id"]: m["cost"] for m in run["members"] if m["agent"]}
+    assert by_id["lead"]["rounds"] == 8 and by_id["lead"]["tokens"] == 8000
+    assert by_id["lead"]["tool_uses"] == 16 and by_id["lead"]["duration_ms"] == 800
+    cost = [m["excerpt"] for m in run["moments"] if m["kind"] == "cost"]
+    assert len(cost) == 1 and "hog" in cost[0]
