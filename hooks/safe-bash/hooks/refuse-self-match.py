@@ -11,6 +11,8 @@ import re
 import sys
 
 QUOTED_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\'[^\']*\'')
+# A command substitution runs even inside double quotes: "$(pgrep -f x)".
+SUBST_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 # A quoted script run by a shell is a command too.
 SHELL_C_RE = re.compile(r'\b(?:ba|z|da)?sh\s+-\w*c\w*\s+("(?:[^"\\]|\\.)*"|\'[^\']*\')')
 # pkill or pgrep in command position: at a line start, after a separator or a shell keyword,
@@ -31,10 +33,15 @@ REASON = ("Refused: `{call}` matches the full command line of every process, inc
 
 
 def commands(command):
-    """The command text with quoted strings blanked, plus each quoted `sh -c` script."""
+    """The command text with quoted strings blanked, plus each quoted `sh -c` script and each
+    command substitution inside double quotes."""
     yield QUOTED_RE.sub('""', command)
     for m in SHELL_C_RE.finditer(command):
         yield from commands(m.group(1)[1:-1])
+    for q in QUOTED_RE.finditer(command):
+        if q.group().startswith('"'):
+            for m in SUBST_RE.finditer(q.group()):
+                yield from commands(m.group(1) if m.group(1) is not None else m.group(2))
 
 
 def refusal(command):

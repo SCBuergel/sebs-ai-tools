@@ -41,6 +41,9 @@ def run(command, tool="Bash"):
     "nice pkill -f x",
     "timeout -s KILL 5 pkill -f x",
     "ls | xargs -r pkill -f",
+    'kill "$(pgrep -f x)"',
+    'echo "$(pkill -f x)"',
+    'p="`pgrep -f x`"',
 ])
 def test_refuses_a_full_command_line_match(command):
     r = run(command)
@@ -63,6 +66,7 @@ def test_refuses_a_full_command_line_match(command):
     "echo pkill -f is refused",
     'git commit -m "a; pkill -f b"',
     "echo 'then pkill -f x'",
+    "echo '$(pkill -f x)'",  # single quotes: no substitution runs
 ])
 def test_lets_everything_else_through(command):
     r = run(command)
