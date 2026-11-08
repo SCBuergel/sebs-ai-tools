@@ -21,6 +21,7 @@ same name, so you install only what you want.
 | `report-gnosis-vpn-results` | Reports, summarizes and compares Gnosis VPN test results from `gnosis_vpn-bench` runs in a standard way: it builds the report with the bench's renderer, puts versions, network, exit, VMs and date at the top of every summary, never reports a failure as zero speed or a short check as a throughput result, and pushes only allowlisted result files to a private results repository as soon as a run has produced them, before its VMs are torn down, without asking. |
 | `review-loop` | Gets everything not pushed yet reviewed by the `commit-reviewer` agent: fixes the findings it returns, resubmits to the same reviewer so that it remembers earlier rounds, and pushes only on `APPROVED`, for at most four rounds. |
 | `review-swarm` | Makes the session the supervisor of a swarm that coordinates through a shared work board instead of messages: reviewer agents audit one area of the repository each, short-lived validators judge and rate their findings, and dev agents fix them in parallel in their own git worktrees, each fix approved by the dev's own `commit-reviewer` and merged by a merge queue that tests the exact rebased commit. Claims are leases, so a stalled agent's work goes to another. Ships the briefs for every role, the board, a test-slot lock, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
+| `reflect` | Runs a retrospective over agent sessions and proposes changes to the setup that ran them: the environment, skills and workflows, never the work itself. A stdlib Python script scores friction in a session together with all its subagents, plus optional orchestration logs, and points to the exact transcript lines; the skill reads only those moments and lists fixes most severe first, each traced to a logged line. It only proposes. Based on Tibor's [`reflect`](https://github.com/Teebor-Choka/skills) skill (MIT, licence in `skills/reflect/LICENSE.upstream`), extended for long multi-agent runs. |
 
 | Agent | What it does |
 | --- | --- |
@@ -39,6 +40,7 @@ claude plugin install report-gnosis-vpn-results@sebs-ai-tools
 claude plugin install review-loop@sebs-ai-tools
 claude plugin install commit-reviewer@sebs-ai-tools
 claude plugin install review-swarm@sebs-ai-tools
+claude plugin install reflect@sebs-ai-tools
 ```
 
 Inside a running Claude Code session, use the same commands with `/plugin`
@@ -60,6 +62,7 @@ share a name, the name appears twice:
 /report-gnosis-vpn-results:report-gnosis-vpn-results
 /review-loop:review-loop
 /review-swarm:review-swarm
+/reflect:reflect
 ```
 
 ## Get your commits reviewed
@@ -167,6 +170,7 @@ claude plugin marketplace remove sebs-ai-tools
 .claude-plugin/marketplace.json    the marketplace: one plugin entry per skill or agent
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
                                    (review-swarm: roles/ briefs, tools/ scripts, rules.md)
+                                   (reflect: scan-sessions.py, tests/, LICENSE.upstream)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
 evals/<skill-name>/<case>/         optional test cases for a skill

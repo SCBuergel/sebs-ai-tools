@@ -1,6 +1,6 @@
 """Tests for scan-sessions.py, the friction scorer.
 
-Run: python3 -m pytest models/models/skills/reflect/tests
+Run: python3 -m pytest <skill folder>/tests
 No third-party deps beyond pytest; sessions are synthesized per test.
 """
 import importlib.util
@@ -196,3 +196,168 @@ def test_short_loose_error_still_counts_for_a_normal_command(tmp_path):
     rows = [asst_bash("t1", "make build"), result_for("t1", "build failed in step 2")]
     r = scan.score_session(write(tmp_path, rows))
     assert r["signals"]["errors"] == 1
+
+
+# --- multi-agent runs -------------------------------------------------------
+
+def asst_text(text="ok"):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+
+def notice(agent_id, status="completed", tokens=1000, tools=5, ms=1000):
+    body = (f"<task-notification>\n<task-id>{agent_id}</task-id>\n<status>{status}</status>\n"
+            f"<usage><subagent_tokens>{tokens}</subagent_tokens><tool_uses>{tools}</tool_uses>"
+            f"<duration_ms>{ms}</duration_ms></usage>\n</task-notification>")
+    return user_text(body)
+
+
+def make_run(tmp_path, parent_rows, agents):
+    """A session folder as Claude Code writes it: <uuid>.jsonl and <uuid>/subagents/."""
+    parent = write(tmp_path, parent_rows, name="sess.jsonl")
+    folder = tmp_path / "sess" / "subagents"
+    folder.mkdir(parents=True)
+    for agent_id, (rows, meta) in agents.items():
+        (folder / f"agent-{agent_id}.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+        (folder / f"agent-{agent_id}.meta.json").write_text(json.dumps(meta))
+    return parent, [str(p) for p in sorted(folder.glob("*.jsonl"))]
+
+
+def sub_rows(*follow_ups):
+    rows = [user_text("Review request: main..HEAD", isSidechain=True), asst_text()]
+    for text in follow_ups:
+        rows += [user_text(text, isSidechain=True), asst_text()]
+    return rows
+
+
+def test_a_session_and_its_subagents_form_one_run(tmp_path):
+    parent, subs = make_run(tmp_path, [user_text("task"), asst_text()], {
+        "a1": (sub_rows(), {"agentType": "reviewer", "description": "R1", "finished": True}),
+        "a2": (sub_rows(), {"agentType": "dev", "description": "dev1", "finished": True}),
+    })
+    runs = scan.group_runs(scan.collect([str(tmp_path)]))
+    assert list(runs) == ["sess"] and sorted(runs["sess"]) == sorted([parent, *subs])
+    run = scan.score_run("sess", runs["sess"])
+    assert run["signals"]["subagents"] == 2
+    assert {m["agent"]["type"] for m in run["members"] if m["agent"]} == {"reviewer", "dev"}
+
+
+def test_run_flag_joins_a_continued_session_with_another_id(tmp_path):
+    first = write(tmp_path, [user_text("task"), asst_text()], name="one.jsonl")
+    second = write(tmp_path, [user_text("go on"), asst_text()], name="two.jsonl")
+    assert list(scan.group_runs([first, second], one_run=True)) == ["run"]
+    assert len(scan.group_runs([first, second])) == 2
+
+
+def test_a_parents_follow_ups_in_a_subagent_are_rework_not_corrections(tmp_path):
+    _, subs = make_run(tmp_path, [user_text("task")], {
+        "a1": (sub_rows("REVISE: don't do that, instead fix the test", "NOT APPROVED, try again"),
+               {"agentType": "dev", "description": "dev1", "finished": True}),
+    })
+    r = scan.score_session(subs[0])
+    assert r["sidechain"] is True
+    assert r["signals"]["corrections"] == 0
+    assert r["signals"]["reworks"] == 2
+    assert [m["kind"] for m in r["moments"]].count("rework") == 2
+
+
+def test_plain_steering_by_the_user_is_a_moment_too(tmp_path):
+    rows = [user_text("build it"), asst_text(),
+            user_text("The timer should start after the second session."), asst_text(),
+            user_text("actually, use twenty seconds")]
+    r = scan.score_session(write(tmp_path, rows))
+    assert (r["signals"]["steers"], r["signals"]["corrections"]) == (1, 1)
+    assert {m["kind"] for m in r["moments"]} == {"steer", "correction"}
+
+
+def test_messages_from_other_sessions_are_not_the_user(tmp_path):
+    rows = [user_text("task"), asst_text(),
+            user_text('<cross-session-message from="x">No, stop, revert it'
+                      '</cross-session-message>')]
+    r = scan.score_session(write(tmp_path, rows))
+    assert (r["signals"]["corrections"], r["signals"]["steers"]) == (0, 0)
+    assert r["signals"]["peer_messages"] == 1
+
+
+def test_notifications_give_each_subagent_its_cost_and_failures(tmp_path):
+    parent_rows = [user_text("task"), asst_text(),
+                   notice("a1", tokens=1000), notice("a2", tokens=1200),
+                   notice("a3", tokens=900), notice("a4", tokens=9000, status="killed"),
+                   notice("a1", tokens=1500)]
+    meta = {"agentType": "reviewer", "description": "x", "finished": True}
+    agents = {agent_id: (sub_rows(), meta) for agent_id in ("a1", "a2", "a3", "a4")}
+    make_run(tmp_path, parent_rows, agents)
+    run = scan.score_run("sess", scan.collect([str(tmp_path)]))
+    by_id = {m["agent"]["id"]: m for m in run["members"] if m["agent"]}
+    assert by_id["a1"]["cost"]["tokens"] == 1500  # the latest totals, not a sum of repeats
+    assert run["signals"]["agent_failures"] == 1
+    assert run["signals"]["tokens"] == 1500 + 1200 + 900 + 9000
+    cost = [m for m in run["moments"] if m["kind"] == "cost"]
+    assert len(cost) == 1 and "a4" in cost[0]["excerpt"]
+    assert cost[0]["file"].endswith("sess.jsonl") and cost[0]["line"] == 6
+
+
+def test_an_unfinished_subagent_is_a_moment(tmp_path):
+    make_run(tmp_path, [user_text("task")], {
+        "a1": (sub_rows(), {"agentType": "dev", "description": "dev3", "finished": False}),
+    })
+    run = scan.score_run("sess", scan.collect([str(tmp_path)]))
+    assert [m["kind"] for m in run["moments"]] == ["unfinished"]
+
+
+def test_a_coordination_log_adds_its_negative_events_to_the_run(tmp_path):
+    parent = write(tmp_path, [user_text("task"), asst_text()])
+    log = tmp_path / "events.jsonl"
+    events = [{"agent": "dispatcher", "kind": "validating", "id": "R1-1"},
+              {"agent": "dispatcher", "kind": "invalid", "id": "R1-2", "msg": "not real"},
+              {"agent": "dev3", "kind": "stopped", "id": "-", "msg": "TaskStop"},
+              "not an object", {"no_kind": True}]
+    log.write_text("\n".join(json.dumps(e) for e in events) + "\nbroken line")
+    run = scan.score_run("s", [parent], coordination=[str(log)])
+    assert run["signals"]["coordination"] == 2
+    assert run["coordination_kinds"] == {"validating": 1, "invalid": 1, "stopped": 1}
+    assert run["coordination_by_agent"] == {"dispatcher": 1, "dev3": 1}
+    lines = [m["line"] for m in run["moments"] if m["kind"] == "coordination"]
+    assert lines == [2, 3]
+
+
+def test_a_long_transcript_shows_moments_from_its_end_too(tmp_path):
+    rows = []
+    for _ in range(600):
+        rows += [asst_tool("Bash", {"command": "make"}), tool_result("error: boom")]
+    rows += [asst_text(), user_text("that's wrong, use the other file")]
+    r = scan.score_session(write(tmp_path, rows))
+    lines = [m["line"] for m in r["moments"] if m["kind"] == "error"]
+    assert len(r["moments"]) <= scan.moment_cap(len(rows))
+    assert min(lines) < 100 and max(lines) > 1100  # spread, not the first twenty
+    assert any(m["kind"] == "correction" for m in r["moments"])
+
+
+def test_the_moment_budget_grows_with_length_up_to_a_limit():
+    assert scan.moment_cap(100) == scan.MOMENT_CAP
+    assert scan.moment_cap(4000) == 3 * scan.MOMENT_CAP
+    assert scan.moment_cap(10**6) == scan.MOMENT_CAP_MAX
+    assert scan.moment_cap(10**6, override=7) == 7
+
+
+def test_spread_keeps_the_ends_and_never_exceeds_the_budget():
+    assert scan.spread(list(range(10)), 3) == [0, 4, 9]  # round() rounds 4.5 to even
+    assert scan.spread([1, 2], 5) == [1, 2]
+    assert scan.spread([1, 2], 0) == []
+
+
+def test_cli_table_and_json_cover_runs(tmp_path, capsys):
+    import sys as _sys
+    parent, _ = make_run(tmp_path, [user_text("task"), asst_text(), notice("a1")], {
+        "a1": (sub_rows("REVISE 1"), {"agentType": "dev", "description": "dev1", "finished": True}),
+    })
+    _sys.argv = ["scan-sessions.py", str(tmp_path), "--json"]
+    assert scan.main() == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out[0]["run"] == "sess" and out[0]["signals"]["reworks"] == 1
+    _sys.argv = ["scan-sessions.py", str(tmp_path)]
+    assert scan.main() == 0
+    assert "1 subagents" in capsys.readouterr().out
+    other = write(tmp_path, [user_text("x")], name="other.jsonl")
+    _sys.argv = ["scan-sessions.py", parent, other, "--coordination", other]
+    assert scan.main() == 2
+

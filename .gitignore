@@ -13,5 +13,7 @@ Thumbs.db
 .env
 .env.*
 
-# Python
+# Python and its tools
 __pycache__/
+.pytest_cache/
+.ruff_cache/

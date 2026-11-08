@@ -65,6 +65,16 @@
       "description": "Run a review swarm that coordinates through a shared work board: reviewers audit one area each, short-lived validators judge their findings, devs fix them in parallel with their own commit-reviewers, and a test-gated merge queue merges each fix, watched on a terminal and a web dashboard.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
+    },
+    {
+      "name": "reflect",
+      "source": "./skills/reflect",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Retrospective over agent sessions, including long multi-agent runs: scores friction deterministically across a session and its subagents, then proposes most-severe-first fixes to the environment, skills and workflows. Proposes only.",
+      "author": { "name": "Tibor (Teebor-Choka), extended by Sebastian C. Bürgel" },
+      "license": "MIT"
     }
   ]
 }
