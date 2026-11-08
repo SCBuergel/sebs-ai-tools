@@ -32,7 +32,7 @@ with the same name, so you install only what you want.
 
 | Hook | What it does |
 | --- | --- |
-| `safe-bash` | Refuses Bash commands that find or kill processes by their full command line: `pkill -f`, `pgrep -f` (or `--full`) and `killall -r`. The shell running such a command has the pattern in its own command line, so `pkill -f` kills that shell and the rest of the command's output is lost. The refusal tells the agent to kill by PID instead. It applies to every session once installed, including subagents and swarm agents. |
+| `safe-bash` | Refuses Bash commands that find or kill processes by their full command line: `pkill -f` and `pgrep -f` (or `--full`), also inside `if`, loops, `sh -c` scripts and after wrappers such as `sudo` or `timeout`. The shell running such a command has the pattern in its own command line, so `pkill -f` kills that shell and the rest of the command's output is lost. The refusal tells the agent to kill by PID instead. It applies to every session once installed, including subagents and swarm agents. |
 
 ## Install
 
@@ -178,7 +178,7 @@ claude plugin marketplace remove sebs-ai-tools
 ```text
 .claude-plugin/marketplace.json    the marketplace: one plugin entry per skill, agent or hook
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
-                                   (review-swarm: roles/ briefs, tools/ scripts, rules.md)
+                                   (review-swarm: roles/ briefs, tools/ scripts, tests/, rules.md)
                                    (reflect: scan-sessions.py, tests/, LICENSE.upstream)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
@@ -252,8 +252,10 @@ nobody who already has the plugin.
    `${CLAUDE_PLUGIN_ROOT}`, and a test under `hooks/<hook-name>/tests/`.
 2. Add an entry to the `plugins` array in `.claude-plugin/marketplace.json`
    as for an agent, with `"source": "./hooks/<hook-name>"`.
-3. Run its tests and the checks in [Validate and test before pushing](#validate-and-test-before-pushing),
-   then commit and push.
+3. Run its tests, for example `python3 -m pytest hooks/<hook-name>/tests`,
+   and the checks in [Validate and test before pushing](#validate-and-test-before-pushing)
+   (`claude plugin validate` has no check for a hook folder; the test
+   install shows whether the hook is found), then commit and push.
 
 ### Change a skill, an agent or a hook
 

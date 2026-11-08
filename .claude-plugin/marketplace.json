@@ -81,7 +81,7 @@
       "source": "./hooks/safe-bash",
       "strict": false,
       "version": "0.1.0",
-      "description": "A hook that refuses Bash commands matching processes by their full command line (pkill -f, pgrep -f, killall -r), which also match, and kill, the shell running them.",
+      "description": "A hook that refuses Bash commands matching processes by their full command line (pkill -f, pgrep -f), which also match, and kill, the shell running them.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
     }

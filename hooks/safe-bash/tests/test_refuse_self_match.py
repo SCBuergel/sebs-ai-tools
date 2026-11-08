@@ -28,9 +28,19 @@ def run(command, tool="Bash"):
     "timeout 5 pgrep -f x",
     "/usr/bin/pkill -f x",
     "echo $(pgrep -f x)",
-    "killall -r 'dash.*'",
-    "killall --regexp dash",
     "ls\npkill -f x",
+    "if true; then pkill -f x; fi",
+    "while sleep 1; do pgrep -f x; done",
+    "{ pkill -f x; }",
+    "! pgrep -f x",
+    'bash -c "pkill -f x"',
+    "sh -c 'sleep 1; pkill -f x'",
+    "env FOO=1 pkill -f x",
+    "FOO=1 pkill -f x",
+    "sudo -u me pkill -f x",
+    "nice pkill -f x",
+    "timeout -s KILL 5 pkill -f x",
+    "ls | xargs -r pkill -f",
 ])
 def test_refuses_a_full_command_line_match(command):
     r = run(command)
@@ -45,11 +55,14 @@ def test_refuses_a_full_command_line_match(command):
     "pgrep -x mergeq",
     "pgrep -l board",
     "killall dash",
+    "killall -r 'dash.*'",  # -r matches process names, not command lines
     "kill $(cat /tmp/x.pid)",
     "ps -eo pid,args | grep '[b]oard mergeq'",
     'git commit -m "safe-bash: refuse pkill -f"',
     "grep -rn 'pkill -f' docs/",
     "echo pkill -f is refused",
+    'git commit -m "a; pkill -f b"',
+    "echo 'then pkill -f x'",
 ])
 def test_lets_everything_else_through(command):
     r = run(command)

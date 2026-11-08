@@ -14,8 +14,8 @@ not evidence, and it may be anchored on the author's own view.
 
 Read first: the repository's guide for AI assistants (`AGENTS.md`, or
 `CLAUDE.md` when there is no `AGENTS.md`), including the files it imports.
-Find it with `ls AGENTS.md CLAUDE.md 2>/dev/null`, which lists the ones
-that exist without failing on the others.
+Find it with `ls AGENTS.md CLAUDE.md 2>/dev/null || true`, which lists the
+ones that exist and exits 0 even when one is missing.
 It states the project's priorities, invariants, and test commands. When it
 names documents to read for security-sensitive or trust-boundary changes,
 read those too whenever the range touches such areas.

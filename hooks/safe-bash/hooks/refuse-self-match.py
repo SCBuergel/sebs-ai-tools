@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook on Bash: refuse `pkill -f`, `pgrep -f` (or `--full`) and `killall -r`.
+"""PreToolUse hook on Bash: refuse `pkill -f` and `pgrep -f` (or `--full`).
 
 They match against each process's full command line, and the shell that runs the command has
 the pattern in its own command line, so it matches itself: pkill kills that shell (exit 144,
@@ -10,27 +10,39 @@ import json
 import re
 import sys
 
-# A program in command position: at a line start, after a separator, or after a prefix
-# command such as sudo or timeout.
+QUOTED_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\'[^\']*\'')
+# A quoted script run by a shell is a command too.
+SHELL_C_RE = re.compile(r'\b(?:ba|z|da)?sh\s+-\w*c\w*\s+("(?:[^"\\]|\\.)*"|\'[^\']*\')')
+# pkill or pgrep in command position: at a line start, after a separator or a shell keyword,
+# after VAR=value assignments, or after a wrapper command (sudo -u me, timeout -s KILL 5, ...)
+# with whatever options it takes.
 CALL_RE = re.compile(
-    r"(?:^|[;&|(`]|\$\()\s*(?:(?:sudo|exec|command|nohup|xargs|env|timeout\s+\S+)\s+)*"
-    r"(?:\S*/)?(pkill|pgrep|killall)\b([^;&|\n)`]*)",
+    r"(?:^|[;&|(){}!`\n]|\$\(|\b(?:then|do|else|elif|time)\b)\s*"
+    r"(?:\w+=\S*\s+)*"
+    r"(?:(?:sudo|env|nice|ionice|nohup|exec|command|xargs|timeout|stdbuf|setsid|chrt)\b[^;&|\n]*?\s)?"
+    r"(?:\S*/)?(pkill|pgrep)\b([^;&|\n)`}]*)",
     re.M,
 )
-FULL_FLAG = {"pkill": re.compile(r"-[A-Za-z0-9]*f[A-Za-z0-9]*|--full"),
-             "pgrep": re.compile(r"-[A-Za-z0-9]*f[A-Za-z0-9]*|--full"),
-             "killall": re.compile(r"-[A-Za-z]*r[A-Za-z]*|--regexp")}
+FULL_FLAG = re.compile(r"-[A-Za-z0-9]*f[A-Za-z0-9]*|--full")
 REASON = ("Refused: `{call}` matches the full command line of every process, including the shell "
           "running this command, so it kills or finds itself. Kill by PID instead: record the PID "
           "when you start the process (`cmd & echo $! > /tmp/x.pid`, then `kill $(cat /tmp/x.pid)`), "
           "or find it with `pgrep -x <name>` or `ps -eo pid,args | grep '[p]attern'` and kill that PID.")
 
 
+def commands(command):
+    """The command text with quoted strings blanked, plus each quoted `sh -c` script."""
+    yield QUOTED_RE.sub('""', command)
+    for m in SHELL_C_RE.finditer(command):
+        yield from commands(m.group(1)[1:-1])
+
+
 def refusal(command):
-    for m in CALL_RE.finditer(command or ""):
-        program, args = m.group(1), m.group(2).split()
-        if any(FULL_FLAG[program].fullmatch(a) for a in args):
-            return REASON.format(call=f"{program} {' '.join(args)}".strip())
+    for text in commands(command or ""):
+        for m in CALL_RE.finditer(text):
+            program, args = m.group(1), m.group(2).split()
+            if any(FULL_FLAG.fullmatch(a) for a in args):
+                return REASON.format(call=f"{program} {' '.join(args)}".strip())
     return None
 
 
