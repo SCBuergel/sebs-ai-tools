@@ -5,9 +5,11 @@ Each test gets a throwaway home; nothing touches the real ~/.claude, systemd or 
 """
 import importlib.util
 import json
+import os
 import pathlib
 import shlex
 import subprocess
+import time
 import types
 
 import pytest
@@ -149,7 +151,6 @@ def test_collect_keeps_only_the_newest_copy_of_a_name(rr, tmp_path):
     cwd = tmp_path / "turk"
     cwd.mkdir()
     old, new = transcript(rr, cwd, "old1"), transcript(rr, cwd, "new1")
-    import os
     os.utime(old, (1, 1))
     job(rr, "old1aaaa", "Turk", cwd, [])
     job(rr, "new1bbbb", "Turk", cwd, [])
@@ -328,3 +329,102 @@ def test_install_and_uninstall_touch_only_their_files(rr, monkeypatch):
     assert not rr.AUTOSTART.exists() and not (rr.UNIT_DIR / rr.TIMER).exists()
     assert not rr.INSTALLED_SCRIPT.exists() and rr.CONFIG.exists()
     assert ("disable", "--now", rr.TIMER) in calls
+
+
+# --- review fixes -------------------------------------------------------------------
+
+def test_clean_flags_never_replays_the_prompt(rr):
+    assert rr.clean_flags(["fix the bug", "--model", "opus"]) == ["--model", "opus"]
+    assert rr.clean_flags(["--dangerously-skip-permissions", "do it", "--remote-control"]) == \
+        ["--dangerously-skip-permissions", "--remote-control"]
+    assert rr.clean_flags(["--add-dir", "/a", "/b", "--verbose", "go"]) == ["--add-dir", "/a", "/b", "--verbose"]
+    assert rr.clean_flags(["-n", "my name", "--remote-control", "rc name", "-w", "wt"]) == \
+        ["-n", "my name", "--remote-control", "rc name"]
+
+
+def test_collect_finds_the_stored_folder_behind_newer_worktree_entries(rr, tmp_path):
+    main, wt = tmp_path / "repo", tmp_path / "repo/.claude/worktrees/wt"
+    wt.mkdir(parents=True)
+    lines = [{"type": "user", "cwd": str(main)}] + \
+        [{"type": "assistant", "cwd": str(wt), "message": {"model": "m"}}] * 5
+    t = transcript(rr, main, "w1", lines)
+    assert rr.transcript_facts(t)[0][-1] == str(main)
+    rr.LIVE["w1"] = {"pid": None, "cwd": str(wt), "name": "wt"}
+    s = rr.collect()["sessions"][0]
+    assert s["cwd"] == str(main) and s["note"] is None
+
+
+def test_second_auto_restore_in_one_boot_opens_nothing(rr, recorded, monkeypatch):
+    popen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: popen.append(argv))
+    monkeypatch.setattr(rr, "wait_for_network", lambda limit: True)
+    rr.cmd_restore(args(auto=True))
+    rr.cmd_restore(args(auto=True))
+    assert len(popen) == 1
+
+
+def test_old_background_jobs_are_left_out_as_stale(rr, tmp_path):
+    cwd = tmp_path / "old"
+    cwd.mkdir()
+    t = transcript(rr, cwd, "o1")
+    os.utime(t, (1, 1))
+    job(rr, "o1", "Old", cwd, [], scan=t)
+    rr.LIVE["o1x"] = {"pid": None, "cwd": str(cwd), "name": "live"}
+    snap = rr.collect()
+    assert [s["name"] for s in snap["sessions"]] == ["live"]
+    assert snap["stale"][0]["name"] == "Old"
+
+
+def test_extras_stay_out_of_only_and_appear_in_print(rr, recorded, capsys):
+    rr.save_config({"exclude": [], "extras": [{"name": "turk", "cwd": "/tmp", "cmd": "make serve"}],
+                    "start_extras": True})
+    rr.cmd_restore(args(print=True, only=["alpha"]))
+    assert "make serve" not in capsys.readouterr().out
+    rr.cmd_restore(args(print=True))
+    assert "cd /tmp && make serve" in capsys.readouterr().out
+
+
+def test_a_missing_terminal_is_reported_and_the_boot_not_marked(rr, recorded, monkeypatch):
+    def boom(*a, **k):
+        raise FileNotFoundError("xfce4-terminal")
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    assert rr.cmd_restore(args()) == 1
+    assert not rr.restored_marker().exists()
+    assert "failed" in (rr.STATE / "restore.log").read_text()
+
+
+def test_desktop_quote_escapes_for_the_exec_key(rr):
+    assert rr.desktop_quote('/h/a "b" $c\\d 5%') == '"/h/a \\\\"b\\\\" \\\\$c\\\\\\\\d 5%%"'
+
+
+def test_process_helpers_read_a_real_process(tmp_path, monkeypatch):
+    """No stubs: a real process whose command line names `claude`, and its sessions file."""
+    spec = importlib.util.spec_from_file_location("rr_raw", SCRIPT)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    m.CLAUDE_DIR = tmp_path / ".claude"
+    (m.CLAUDE_DIR / "sessions").mkdir(parents=True)
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "claude").write_text('#!/bin/sh\necho "[]"\n')  # stands in for `claude agents --json`
+    (bin_ / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:/usr/bin:/bin")
+    # sh -c keeps its argv: [sh, -c, script, <$0>, args...], and $0 is named claude
+    q = subprocess.Popen(["/bin/sh", "-c", "sleep 30", str(bin_ / "claude"), "--resume", "sid-456"])
+    try:
+        for _ in range(50):
+            if m.proc_args(q.pid):
+                break
+            time.sleep(0.02)
+        assert m.proc_args(q.pid) == ["--resume", "sid-456"]
+        start = m.proc_start(q.pid)
+        assert start and start.isdigit()
+        sessions = m.CLAUDE_DIR / "sessions"
+        (sessions / f"{q.pid}.json").write_text(json.dumps(
+            {"pid": q.pid, "sessionId": "sid-file", "procStart": start}))
+        (sessions / "1.json").write_text(json.dumps({"pid": 1, "sessionId": "sid-pid-1", "procStart": "0"}))
+        assert set(m.live_sessions()) == {"sid-file"}
+        assert {"sid-file", "sid-456"} <= m.running_ids()
+    finally:
+        q.kill()
+        q.wait()

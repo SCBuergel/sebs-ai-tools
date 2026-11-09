@@ -1,6 +1,6 @@
 ---
 name: reboot-resume
-description: Persist every Claude Code session running on this Linux machine, interactive tabs and background (--bg) sessions alike, and bring them back after the machine or VM restarts, each in its own terminal tab in the right folder with the same flags. Use when the user wants to persist or save sessions, survive a reboot or restart, restore or reopen sessions after a restart, see what would come back, keep a session out of the restore, or install or remove the automatic snapshot and restore.
+description: Persist the Claude Code sessions on this Linux machine, the running interactive tabs and recent background (--bg) sessions, and bring them back after the machine or VM restarts, each in its own terminal tab in the right folder with the same flags. Use when the user wants to persist or save sessions, survive a reboot or restart, restore or reopen sessions after a restart, see what would come back, keep a session out of the restore, or install or remove the automatic snapshot and restore.
 ---
 
 # Reboot resume
@@ -23,21 +23,21 @@ Run `python3 <skill folder>/reboot-resume.py <command>` before it is installed. 
 
 ## What it records
 
-- **Interactive sessions:** from `claude agents --json` and `~/.claude/sessions/`. Their flags come from the process command line.
-- **Background sessions:** from `~/.claude/jobs/*/state.json`, using `respawnFlags`. They are recorded even when the background daemon has died.
+- **Interactive sessions:** the running ones, from `claude agents --json` and `~/.claude/sessions/` (either is enough). Their flags come from the process command line. A session you close drops out of the next snapshot.
+- **Background sessions:** from `~/.claude/jobs/*/state.json`, using `respawnFlags`, even when the background daemon has died. A job's folder stays on disk after it finishes, so a background session that is not running is recorded only if its transcript changed in the last 7 days (`background_max_age_days` in the config). The dry run lists the older ones as skipped. To keep a background session out of later restores before then, use `exclude`; each restored tab prints the command when it ends.
 - **Folder:** `claude --resume` finds a transcript by the current folder. So the folder is the cwd recorded in the transcript whose encoding matches the transcript's project folder, which may be a git worktree the session moved into. If none exists, the session's own folder is used and the dry run notes it.
-- **Model:** a session without `--model` gets the model its transcript last used. All other flags are kept as the session had them, minus the ones that select a session (`--resume`, `--continue`, `--session-id`, `--bg`).
+- **Flags and model:** a session without `--model` gets the model its transcript last used. All other options are kept as the session had them, minus the ones that pick or start a session (`--resume`, `--continue`, `--session-id`, `--bg`, `--worktree`, `--print` and similar). A prompt given on the command line is never kept, so a restore does not send it again.
 - **Duplicates:** when a session was resumed as a new copy under the same name, only the newest copy is restored.
 - **Nothing secret:** a snapshot holds ids, names, folders, flags and models, never the environment or tokens.
 - **User services:** running services from the user's own unit files are listed in the dry run with whether they are enabled. Restore never starts them.
 
 ## Safety rules
 
-- **Idempotent.** A restore skips every session that is already running, so running it twice opens nothing twice.
+- **Idempotent.** A restore skips every session that is already running, and the login restore runs once per boot, so a second login does not reopen sessions you closed.
 - **Correct after an unplanned restart.** The default restore uses the newest snapshot from an earlier boot. After boot, the timer writes no snapshot until the restore has run (or for 30 minutes), so a restart does not replace the record with an empty one. The newest snapshot of each of the last 5 boots is always kept.
 - **Failures stay visible.** Each tab prints its command. If `claude` fails or the folder is gone, the tab says so and keeps a shell open. The other tabs open regardless.
 - **Login wait.** At login the restore waits 15 seconds, then up to 3 minutes for `api.anthropic.com` to be reachable, then opens the tabs anyway.
-- **Extras are opt-in.** Other commands worth restarting go in `~/.config/reboot-resume/config.json` as `"extras": [{"name": …, "cwd": …, "cmd": …}]`. They are only listed unless `"start_extras": true`.
+- **Extras are opt-in.** Other commands worth restarting go in `~/.config/reboot-resume/config.json` as `"extras": [{"name": …, "cwd": …, "cmd": …}]`. They are only listed unless `"start_extras": true`. Extras are not checked for already running, and `--only` leaves them out.
 - **Install touches only these files:**
   - `~/.local/share/reboot-resume/`
   - `~/.config/systemd/user/reboot-resume-snapshot.{service,timer}`
@@ -57,4 +57,4 @@ Run `python3 <skill folder>/reboot-resume.py <command>` before it is installed. 
    4. Run `restore --snapshot latest --only rr-test`. One new window should open, with one tab that continues that conversation.
 4. After a restart, if the tabs did not appear, check `status` and `~/.local/state/reboot-resume/restore.log`, then use `restore` or `restore --print`.
 
-Linux only, and the window needs `xfce4-terminal`. Without it, use `restore --print`.
+Linux only, and the window needs `xfce4-terminal`. Without it, a restore fails with a message, and `restore --print` gives the commands.

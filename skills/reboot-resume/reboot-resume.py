@@ -37,9 +37,22 @@ CLAUDE_DIR = HOME / ".claude"
 KEEP_LAST = 20          # snapshots kept regardless of boot
 KEEP_BOOTS = 5          # plus the newest snapshot of each of this many boots
 TIMER_GRACE = 30 * 60   # the timer waits this long after boot for the restore before snapshotting anyway
-# Flags that select or start a session; restore supplies its own --resume.
-DROP_FLAGS = {"--resume": "opt", "-r": "opt", "--continue": 0, "-c": 0, "--session-id": 1,
-              "--fork-session": 0, "--bg": 0, "--background": 0, "--print": 0, "-p": 0}
+# How claude's options take arguments (from `claude --help`): exactly one value, any number of
+# values, or an optional one. Any other option is a switch, and a bare word after a switch is the
+# prompt, which restore must not send again.
+ONE_VALUE = {"--agent", "--agents", "--append-system-prompt", "--append-system-prompt-file",
+             "--autocompact", "--debug-file", "--effort", "--environment", "--fallback-model",
+             "--input-format", "--json-schema", "--max-budget-usd", "--model", "-n", "--name",
+             "--output-format", "--permission-mode", "--permission-prompts", "--permission-prompt-tool",
+             "--plugin-dir", "--plugin-url", "--remote-control-session-name-prefix", "--session-id",
+             "--setting-sources", "--settings", "--system-prompt", "--system-prompt-snapshot"}
+MANY_VALUES = {"--add-dir", "--allowedTools", "--allowed-tools", "--betas", "--disallowedTools",
+               "--disallowed-tools", "--file", "--mcp-config", "--tools"}
+OPTIONAL_VALUE = {"--remote-control", "-d", "--debug", "--cloud", "--from-pr", "--prompt-suggestions",
+                  "--teleport", "-w", "--worktree", "-r", "--resume"}
+# Options that pick, start or fork a session; restore supplies its own --resume.
+DROP = {"--resume", "-r", "--continue", "-c", "--session-id", "--fork-session", "--bg", "--background",
+        "--print", "-p", "-w", "--worktree", "--from-pr", "--teleport", "--cloud"}
 
 
 def log(msg):
@@ -66,17 +79,27 @@ def encode_dir(path):
 
 
 def clean_flags(args):
+    """The options of a claude command line, without the prompt and without session selection."""
     out, i = [], 0
     while i < len(args):
         a = args[i]
-        name = a.split("=", 1)[0]
-        kind = DROP_FLAGS.get(name)
-        if kind is None:
-            out.append(a)
-        elif "=" not in a and (kind == 1 or (kind == "opt" and i + 1 < len(args)
-                                             and not args[i + 1].startswith("-"))):
-            i += 1
         i += 1
+        if not a.startswith("-") or a == "--":
+            continue  # a prompt word (or the end of options): never replayed
+        name = a.split("=", 1)[0]
+        group = [a]
+        if "=" not in a:
+            if name in ONE_VALUE and i < len(args):
+                group.append(args[i])
+                i += 1
+            elif name in MANY_VALUES or name in OPTIONAL_VALUE:
+                while i < len(args) and not args[i].startswith("-"):
+                    group.append(args[i])
+                    i += 1
+                    if name in OPTIONAL_VALUE:
+                        break
+        if name not in DROP:
+            out += group
     return out
 
 
@@ -111,8 +134,9 @@ def tail_lines(path, block=1 << 20, limit=64 << 20):
 
 
 def transcript_facts(path):
-    """The cwds a transcript recorded (newest first, distinct) and the model it last used."""
-    cwds, model = [], None
+    """The cwds a transcript recorded (newest first, distinct) and the model it last used. Reads
+    back until it has the model and a cwd matching the folder the transcript is stored under."""
+    cwds, model, want, matched = [], None, path.parent.name, False
     try:
         for raw in tail_lines(path):
             if b'"cwd"' not in raw and b'"model"' not in raw:
@@ -124,13 +148,14 @@ def transcript_facts(path):
             if not isinstance(e, dict):
                 continue
             c = e.get("cwd")
-            if isinstance(c, str) and c not in cwds and len(cwds) < 8:
+            if isinstance(c, str) and c not in cwds and len(cwds) < 50:
                 cwds.append(c)
+                matched = matched or encode_dir(c) == want
             if model is None and e.get("type") == "assistant":
                 m = (e.get("message") or {}).get("model")
                 if isinstance(m, str) and m and not m.startswith("<"):
                     model = m
-            if model and cwds:
+            if model and matched:
                 break
     except OSError:
         pass
@@ -296,12 +321,21 @@ def collect():
         kept += winners
         superseded += [{"id": s["id"], "name": s["name"], "by": winners[0]["id"]}
                        for s in group if s not in winners]
+    # Background jobs stay on disk after they finish (and look finished when the daemon died), so
+    # one that is not running comes back only while it was active in the last few days.
+    max_age = load_config()["background_max_age_days"] * 86400
+    stale = [s for s in kept if s["kind"] == "background" and not s["running"]
+             and time.time() - s["mtime"] > max_age]
+    kept = [s for s in kept if s not in stale]
     kept.sort(key=lambda s: (s["kind"] != "interactive", s["name"].lower()))
     for s in kept:
         s.pop("running")
     return {"version": 1, "taken_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
             "boot_id": boot_id(), "host": socket.gethostname(), "sessions": kept,
-            "superseded": superseded, "user_services": user_services()}
+            "superseded": superseded, "user_services": user_services(),
+            "stale": [{"id": s["id"], "name": s["name"],
+                       "last_active": datetime.datetime.fromtimestamp(s["mtime"]).date().isoformat()}
+                      for s in stale]}
 
 
 # --- snapshot files -----------------------------------------------------------
@@ -372,7 +406,7 @@ def pick_snapshot(which):
 # --- config -------------------------------------------------------------------
 
 def load_config():
-    cfg = {"exclude": [], "extras": [], "start_extras": False}
+    cfg = {"exclude": [], "extras": [], "start_extras": False, "background_max_age_days": 7}
     try:
         cfg.update(json.loads(CONFIG.read_text()))
     except (OSError, ValueError):
@@ -394,13 +428,16 @@ def matches(s, key):
 
 # --- restore ------------------------------------------------------------------
 
-def tab_script(cwd, argv):
+def tab_script(cwd, argv, sid=""):
     cmd = shlex.join(["claude"] + argv)
+    script = INSTALLED_SCRIPT if INSTALLED_SCRIPT.exists() else pathlib.Path(__file__).resolve()
+    hint = f"[reboot-resume] To leave it out of later restores: python3 {script} exclude {sid[:8]}"
     return (f'export PATH="$HOME/.local/bin:$PATH"\n'
             f"if cd -- {shlex.quote(cwd)}; then\n"
             f"  echo {shlex.quote('[reboot-resume] ' + cmd)}\n"
             f"  {cmd}\n"
             f'  rc=$?; echo; echo "[reboot-resume] claude ended with exit code $rc. This tab stays open."\n'
+            f"  echo {shlex.quote(hint)}\n"
             f"else\n"
             f"  echo {shlex.quote('[reboot-resume] folder ' + cwd + ' is gone; not resumed.')}\n"
             f"fi\n"
@@ -467,6 +504,9 @@ def wait_for_network(limit):
 
 
 def cmd_restore(a):
+    if a.auto and restored_marker().exists():
+        log("[reboot-resume] this boot was restored already")  # e.g. a second login
+        return 0
     if a.auto:
         time.sleep(a.delay)
         if not wait_for_network(a.network_wait):
@@ -479,17 +519,16 @@ def cmd_restore(a):
         return 0 if a.auto else 1
     cfg = load_config()
     todo, skipped = plan(snap, cfg, a.only, running_ids())
-    extras = cfg["extras"] if cfg.get("start_extras") else []
-    if a.print:
-        for s in todo:
-            print(f"cd {shlex.quote(s['cwd'])} && {shlex.join(['claude'] + resume_argv(s))}")
-        return 0
-    tabs = [(s["name"], s["cwd"], tab_script(s["cwd"], resume_argv(s))) for s in todo]
+    # Extras are started only when enabled, and not with --only, which picks sessions.
+    extras = [e for e in cfg["extras"] if e.get("cmd")] if cfg.get("start_extras") and not a.only else []
+    tabs = [(s["name"], s["cwd"], tab_script(s["cwd"], resume_argv(s), s["id"])) for s in todo]
     lines = [f"cd {shlex.quote(s['cwd'])} && {shlex.join(['claude'] + resume_argv(s))}" for s in todo]
     tabs += [(e.get("name", "extra"), e.get("cwd", str(HOME)),
-              f"cd -- {shlex.quote(e.get('cwd', str(HOME)))} && {e['cmd']}\nexec bash -i\n")
-             for e in extras if e.get("cmd")]
-    lines += [f"cd {shlex.quote(e.get('cwd', str(HOME)))} && {e['cmd']}" for e in extras if e.get("cmd")]
+              f"cd -- {shlex.quote(e.get('cwd', str(HOME)))} && {e['cmd']}\nexec bash -i\n") for e in extras]
+    lines += [f"cd {shlex.quote(e.get('cwd', str(HOME)))} && {e['cmd']}" for e in extras]
+    if a.print:
+        print("\n".join(lines))
+        return 0
     if a.dry_run or not a.auto:
         print(f"Snapshot: {path} (taken {snap['taken_at']})")
         for s in todo:
@@ -499,8 +538,10 @@ def cmd_restore(a):
             print(f"  skip     {s['name']:<24} {why}")
         for x in snap.get("superseded", []):
             print(f"  skip     {x['name']:<24} superseded by {x['by'][:8]}")
+        for x in snap.get("stale", []):
+            print(f"  skip     {x['name']:<24} background, last active {x['last_active']}")
         for e in cfg["extras"]:
-            state = "started as a tab" if cfg.get("start_extras") else "not started (start_extras is off)"
+            state = "started as a tab" if e in extras else "not started (start_extras is off, or --only)"
             print(f"  extra    {e.get('name', '?'):<24} {state}")
         for u in snap.get("user_services", []):
             how = "enabled, starts by itself" if u["enabled"] else "NOT enabled, will not come back"
@@ -519,7 +560,12 @@ def cmd_restore(a):
     argv = terminal_argv(write_tabs(tabs))
     with open(STATE / "restore.log", "a") as lf:
         lf.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} {path}\n{shlex.join(argv)}\n")
-        subprocess.Popen(argv, stdout=lf, stderr=lf, stdin=subprocess.DEVNULL, start_new_session=True)
+        try:
+            subprocess.Popen(argv, stdout=lf, stderr=lf, stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            lf.write(f"failed: {e}\n")
+            log(f"[reboot-resume] could not start {argv[0]}: {e}. Use restore --print instead.")
+            return 1
     mark_restored()
     print(f"Opened {len(tabs)} tab(s).")
     return 0
@@ -547,14 +593,21 @@ def cmd_snapshot(a):
     return 0
 
 
+def desktop_quote(arg):
+    """Quote one argument for a desktop entry's Exec key (the spec's escaping, then the key's own)."""
+    quoted = '"' + re.sub(r'(["`$\\])', r"\\\1", arg) + '"'
+    return quoted.replace("\\", "\\\\").replace("%", "%%")
+
+
 def unit_text():
     script = shlex.quote(str(INSTALLED_SCRIPT))
     service = ("[Unit]\nDescription=Record running Claude Code sessions for reboot-resume\n\n"
-               f"[Service]\nType=oneshot\nExecStart=/usr/bin/python3 {script} snapshot --timer --quiet\n")
+               "[Service]\nType=oneshot\nEnvironment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
+               f"ExecStart=/usr/bin/python3 {script} snapshot --timer --quiet\n")
     timer = ("[Unit]\nDescription=Record running Claude Code sessions every few minutes\n\n"
              "[Timer]\nOnBootSec=3min\nOnUnitActiveSec=3min\n\n[Install]\nWantedBy=timers.target\n")
     desktop = ("[Desktop Entry]\nType=Application\nName=Restore Claude Code sessions\n"
-               f"Exec=/usr/bin/python3 \"{INSTALLED_SCRIPT}\" restore --auto\n"
+               f"Exec=/usr/bin/python3 {desktop_quote(str(INSTALLED_SCRIPT))} restore --auto\n"
                "X-GNOME-Autostart-enabled=true\nNoDisplay=true\n")
     return service, timer, desktop
 

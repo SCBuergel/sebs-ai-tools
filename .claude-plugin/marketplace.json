@@ -82,7 +82,7 @@
       "strict": false,
       "skills": ["./"],
       "version": "0.1.0",
-      "description": "Persist every running Claude Code session on a Linux machine, interactive and background, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
+      "description": "Persist the Claude Code sessions on a Linux machine, running interactive ones and recent background ones, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
     },
