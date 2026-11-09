@@ -248,7 +248,7 @@ def test_tab_script_runs_in_bash_and_keeps_the_tab(rr, tmp_path):
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                        env={"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(tmp_path), "OUT": str(out)})
     assert out.read_text().splitlines() == ["ARGS:--resume x --remote-control a b", str(there)]
-    assert "exit code 3" in r.stdout and "KEPT" in r.stdout
+    assert "exit code 3" in r.stdout and "KEPT" in r.stdout and "exclude" not in r.stdout
 
 
 def test_tab_script_for_a_missing_folder_does_not_run_claude(rr, tmp_path):

@@ -415,16 +415,13 @@ def matches(s, key):
 
 # --- restore ------------------------------------------------------------------
 
-def tab_script(cwd, argv, sid=""):
+def tab_script(cwd, argv):
     cmd = shlex.join(["claude"] + argv)
-    script = INSTALLED_SCRIPT if INSTALLED_SCRIPT.exists() else pathlib.Path(__file__).resolve()
-    hint = f"[reboot-resume] To leave it out of later restores: python3 {script} exclude {sid[:8]}"
     return (f'export PATH="$HOME/.local/bin:$PATH"\n'
             f"if cd -- {shlex.quote(cwd)}; then\n"
             f"  echo {shlex.quote('[reboot-resume] ' + cmd)}\n"
             f"  {cmd}\n"
             f'  rc=$?; echo; echo "[reboot-resume] claude ended with exit code $rc. This tab stays open."\n'
-            f"  echo {shlex.quote(hint)}\n"
             f"else\n"
             f"  echo {shlex.quote('[reboot-resume] folder ' + cwd + ' is gone; not resumed.')}\n"
             f"fi\n"
@@ -508,7 +505,7 @@ def cmd_restore(a):
     todo, skipped = plan(snap, cfg, a.only, running_ids())
     # Extras are started only when enabled, and not with --only, which picks sessions.
     extras = [e for e in cfg["extras"] if e.get("cmd")] if cfg.get("start_extras") and not a.only else []
-    tabs = [(s["name"], s["cwd"], tab_script(s["cwd"], resume_argv(s), s["id"])) for s in todo]
+    tabs = [(s["name"], s["cwd"], tab_script(s["cwd"], resume_argv(s))) for s in todo]
     lines = [f"cd {shlex.quote(s['cwd'])} && {shlex.join(['claude'] + resume_argv(s))}" for s in todo]
     tabs += [(e.get("name", "extra"), e.get("cwd", str(HOME)),
               f"cd -- {shlex.quote(e.get('cwd', str(HOME)))} && {e['cmd']}\nexec bash -i\n") for e in extras]

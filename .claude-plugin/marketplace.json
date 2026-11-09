@@ -81,7 +81,7 @@
       "source": "./skills/reboot-resume",
       "strict": false,
       "skills": ["./"],
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Persist the Claude Code sessions running on a Linux machine, interactive and background, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
