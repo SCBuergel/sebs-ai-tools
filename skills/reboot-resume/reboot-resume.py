@@ -232,7 +232,12 @@ def live_sessions():
 
 
 def running_ids():
-    ids = set(live_sessions())
+    return set(live_sessions()) | proc_session_ids()
+
+
+def proc_session_ids():
+    """Session ids named on a running claude command line (--resume, --session-id)."""
+    ids = set()
     for p in pathlib.Path("/proc").iterdir():
         if p.name.isdigit():
             args = proc_args(p.name) or []
@@ -280,7 +285,7 @@ def user_services():
 def collect():
     sessions = {}
 
-    def add(sid, kind, name, cwd, flags, transcript_hint, running):
+    def add(sid, kind, name, cwd, flags, transcript_hint):
         t = find_transcript(sid, transcript_hint)
         cwds, model = transcript_facts(t) if t else ([], None)
         folder, note = resume_dir(t, cwds, [cwd])
@@ -288,54 +293,36 @@ def collect():
         if model and not flag_value(flags, "--model"):
             flags += ["--model", model]
         sessions[sid] = {
-            "id": sid, "name": name or os.path.basename(folder.rstrip("/")) or sid[:8], "named": bool(name),
+            "id": sid, "name": name or os.path.basename(folder.rstrip("/")) or sid[:8],
             "kind": kind, "cwd": folder, "flags": flags, "model": flag_value(flags, "--model") or model,
-            "transcript": str(t) if t else None, "note": note, "running": running,
-            "mtime": t.stat().st_mtime if t else 0,
+            "transcript": str(t) if t else None, "note": note,
         }
 
-    live = live_sessions()
+    # Only sessions running now are recorded. A background job's folder stays on disk after the
+    # job ends (and looks idle when the daemon died), so a job counts only while its session runs.
+    live, procs = live_sessions(), proc_session_ids()
+    jobs_by_id = {j["sessionId"]: j for j in jobs()}
     for sid, a in live.items():
+        j = jobs_by_id.get(sid)
         args = proc_args(a["pid"]) if a.get("pid") else None
-        add(sid, a.get("kind") or "interactive", a.get("name"), a.get("cwd"), args or [], None, True)
-    for j in jobs():
-        sid = j["sessionId"]
+        if args is None and j:
+            args = list(j.get("respawnFlags") or [])
+        add(sid, "background" if j else a.get("kind") or "interactive", a.get("name") or (j or {}).get("name"),
+            a.get("cwd") or (j or {}).get("cwd"), args or [], (j or {}).get("linkScanPath"))
+    not_running = []
+    for sid, j in jobs_by_id.items():
         if sid in sessions:
-            sessions[sid]["kind"] = "background"
             continue
-        add(sid, "background", j.get("name"), j.get("cwd"), list(j.get("respawnFlags") or []),
-            j.get("linkScanPath"), False)
-
-    # A session resumed as a new copy keeps the name: restore only the newest of each name,
-    # unless several of them are running now.
-    kept, superseded = [], []
-    by_name = {}
-    for s in sessions.values():
-        if s["named"]:
-            by_name.setdefault(s["name"], []).append(s)
+        if sid in procs:
+            add(sid, "background", j.get("name"), j.get("cwd"), list(j.get("respawnFlags") or []),
+                j.get("linkScanPath"))
         else:
-            kept.append(s)
-    for group in by_name.values():
-        live_ones = [s for s in group if s["running"]]
-        winners = live_ones or [max(group, key=lambda s: s["mtime"])]
-        kept += winners
-        superseded += [{"id": s["id"], "name": s["name"], "by": winners[0]["id"]}
-                       for s in group if s not in winners]
-    # Background jobs stay on disk after they finish (and look finished when the daemon died), so
-    # one that is not running comes back only while it was active in the last few days.
-    max_age = load_config()["background_max_age_days"] * 86400
-    stale = [s for s in kept if s["kind"] == "background" and not s["running"]
-             and time.time() - s["mtime"] > max_age]
-    kept = [s for s in kept if s not in stale]
-    kept.sort(key=lambda s: (s["kind"] != "interactive", s["name"].lower()))
-    for s in kept:
-        s.pop("running")
+            not_running.append({"id": sid, "name": j.get("name") or os.path.basename(j.get("cwd") or "") or sid[:8]})
+    kept = sorted(sessions.values(), key=lambda s: (s["kind"] != "interactive", s["name"].lower()))
     return {"version": 1, "taken_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
             "boot_id": boot_id(), "host": socket.gethostname(), "sessions": kept,
-            "superseded": superseded, "user_services": user_services(),
-            "stale": [{"id": s["id"], "name": s["name"],
-                       "last_active": datetime.datetime.fromtimestamp(s["mtime"]).date().isoformat()}
-                      for s in stale]}
+            "not_running": sorted(not_running, key=lambda x: x["name"].lower()),
+            "user_services": user_services()}
 
 
 # --- snapshot files -----------------------------------------------------------
@@ -406,7 +393,7 @@ def pick_snapshot(which):
 # --- config -------------------------------------------------------------------
 
 def load_config():
-    cfg = {"exclude": [], "extras": [], "start_extras": False, "background_max_age_days": 7}
+    cfg = {"exclude": [], "extras": [], "start_extras": False}
     try:
         cfg.update(json.loads(CONFIG.read_text()))
     except (OSError, ValueError):
@@ -536,10 +523,8 @@ def cmd_restore(a):
             print(f"  restore  {s['name']:<24} {s['kind']:<11} {s['cwd']}{note}")
         for s, why in skipped:
             print(f"  skip     {s['name']:<24} {why}")
-        for x in snap.get("superseded", []):
-            print(f"  skip     {x['name']:<24} superseded by {x['by'][:8]}")
-        for x in snap.get("stale", []):
-            print(f"  skip     {x['name']:<24} background, last active {x['last_active']}")
+        for x in snap.get("not_running", []):
+            print(f"  skip     {x['name']:<24} background job {x['id'][:8]}, not running at snapshot time")
         for e in cfg["extras"]:
             state = "started as a tab" if e in extras else "not started (start_extras is off, or --only)"
             print(f"  extra    {e.get('name', '?'):<24} {state}")

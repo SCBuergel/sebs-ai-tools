@@ -37,10 +37,11 @@ def rr(tmp_path, monkeypatch):
     m.LIVE = {}
     monkeypatch.setattr(m, "live_sessions", lambda: dict(m.LIVE))
     monkeypatch.setattr(m, "proc_args", lambda pid: m.ARGS.get(pid))
-    monkeypatch.setattr(m, "running_ids", lambda: set(m.LIVE))
+    monkeypatch.setattr(m, "running_ids", lambda: set(m.LIVE) | m.PROCS)
+    monkeypatch.setattr(m, "proc_session_ids", lambda: set(m.PROCS))
     monkeypatch.setattr(m, "user_services", lambda: [])
     monkeypatch.setattr(m, "boot_id", lambda: m.BOOT)
-    m.ARGS, m.BOOT = {}, "boot-1"
+    m.ARGS, m.BOOT, m.PROCS = {}, "boot-1", set()
     return m
 
 
@@ -135,34 +136,17 @@ def test_collect_interactive_takes_flags_from_the_process_and_model_from_transcr
     assert (s["name"], s["kind"], s["cwd"]) == ("home", "interactive", str(cwd))
 
 
-def test_collect_background_keeps_respawn_flags_and_their_model(rr, tmp_path):
+def test_collect_running_background_job_keeps_respawn_flags_and_their_model(rr, tmp_path):
     cwd = tmp_path / "bg"
     cwd.mkdir()
     t = transcript(rr, cwd, "b1")
     job(rr, "b1", "Bridge", cwd, ["--remote-control", "-n", "Bridge", "--model", "opus"], scan=t)
+    rr.PROCS.add("b1")  # its process runs (e.g. under the daemon with --resume b1)
     snap = rr.collect()
     s = snap["sessions"][0]
     assert s["flags"] == ["--remote-control", "-n", "Bridge", "--model", "opus"]
     assert s["kind"] == "background" and s["transcript"] == str(t)
     assert "SECRET" not in json.dumps(snap) and "cse_secret" not in json.dumps(snap)
-
-
-def test_collect_keeps_only_the_newest_copy_of_a_name(rr, tmp_path):
-    cwd = tmp_path / "turk"
-    cwd.mkdir()
-    old, new = transcript(rr, cwd, "old1"), transcript(rr, cwd, "new1")
-    os.utime(old, (1, 1))
-    job(rr, "old1aaaa", "Turk", cwd, [])
-    job(rr, "new1bbbb", "Turk", cwd, [])
-    # job ids differ from transcript ids above only in the folder name; point them right
-    for sid, t in (("old1aaaa", old), ("new1bbbb", new)):
-        st = rr.CLAUDE_DIR / "jobs" / sid[:8] / "state.json"
-        d = json.loads(st.read_text())
-        d["linkScanPath"] = str(t)
-        st.write_text(json.dumps(d))
-    snap = rr.collect()
-    assert [s["id"] for s in snap["sessions"]] == ["new1bbbb"]
-    assert snap["superseded"][0]["id"] == "old1aaaa"
 
 
 def test_collect_keeps_two_running_sessions_of_one_name(rr, tmp_path):
@@ -171,10 +155,11 @@ def test_collect_keeps_two_running_sessions_of_one_name(rr, tmp_path):
     assert len(rr.collect()["sessions"]) == 2
 
 
-def test_running_background_session_stays_background(rr, tmp_path):
-    rr.LIVE["b1"] = {"pid": None, "cwd": str(tmp_path), "name": "x", "kind": "interactive"}
-    job(rr, "b1", "x", tmp_path, [])
-    assert rr.collect()["sessions"][0]["kind"] == "background"
+def test_running_background_session_stays_background_with_its_respawn_flags(rr, tmp_path):
+    rr.LIVE["b1"] = {"pid": None, "cwd": str(tmp_path), "kind": "interactive"}
+    job(rr, "b1", "x", tmp_path, ["-n", "x", "--model", "opus"])
+    s = rr.collect()["sessions"][0]
+    assert (s["kind"], s["name"], s["flags"]) == ("background", "x", ["-n", "x", "--model", "opus"])
 
 
 # --- snapshot files ------------------------------------------------------------------
@@ -363,16 +348,27 @@ def test_second_auto_restore_in_one_boot_opens_nothing(rr, recorded, monkeypatch
     assert len(popen) == 1
 
 
-def test_old_background_jobs_are_left_out_as_stale(rr, tmp_path):
-    cwd = tmp_path / "old"
+def test_background_jobs_that_are_not_running_are_never_recorded(rr, tmp_path):
+    cwd = tmp_path / "jobs"
     cwd.mkdir()
-    t = transcript(rr, cwd, "o1")
-    os.utime(t, (1, 1))
-    job(rr, "o1", "Old", cwd, [], scan=t)
-    rr.LIVE["o1x"] = {"pid": None, "cwd": str(cwd), "name": "live"}
+    for sid, name in (("recent1", "Recent"), ("old1", "Old")):
+        job(rr, sid, name, cwd, ["-n", name], scan=transcript(rr, cwd, sid))  # fresh transcripts
+    os.utime(rr.CLAUDE_DIR / "projects" / rr.encode_dir(str(cwd)) / "old1.jsonl", (1, 1))
+    rr.LIVE["l1"] = {"pid": None, "cwd": str(cwd), "name": "live"}
     snap = rr.collect()
     assert [s["name"] for s in snap["sessions"]] == ["live"]
-    assert snap["stale"][0]["name"] == "Old"
+    assert [x["name"] for x in snap["not_running"]] == ["Old", "Recent"]
+
+
+def test_dry_run_lists_jobs_that_were_not_running(rr, tmp_path, capsys):
+    job(rr, "gone1", "Gone", tmp_path, [])
+    rr.LIVE["l1"] = {"pid": None, "cwd": str(tmp_path), "name": "live"}
+    rr.write_snapshot(rr.collect())
+    rr.BOOT, rr.LIVE = "boot-2", {}
+    rr.cmd_restore(args(dry_run=True))
+    out = capsys.readouterr().out
+    assert "Gone" in out and "background job gone1, not running at snapshot time" in out
+    assert "gone1" not in out.split("Would run:")[1]
 
 
 def test_extras_stay_out_of_only_and_appear_in_print(rr, recorded, capsys):

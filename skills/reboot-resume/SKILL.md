@@ -1,11 +1,11 @@
 ---
 name: reboot-resume
-description: Persist the Claude Code sessions on this Linux machine, the running interactive tabs and recent background (--bg) sessions, and bring them back after the machine or VM restarts, each in its own terminal tab in the right folder with the same flags. Use when the user wants to persist or save sessions, survive a reboot or restart, restore or reopen sessions after a restart, see what would come back, keep a session out of the restore, or install or remove the automatic snapshot and restore.
+description: Persist the Claude Code sessions running on this Linux machine, interactive tabs and running background (--bg) sessions, and bring them back after the machine or VM restarts, each in its own terminal tab in the right folder with the same flags. Use when the user wants to persist or save sessions, survive a reboot or restart, restore or reopen sessions after a restart, see what would come back, keep a session out of the restore, or install or remove the automatic snapshot and restore.
 ---
 
 # Reboot resume
 
-`reboot-resume.py` (in this skill's folder; stdlib Python 3) records the sessions on this machine and reopens them after a restart, in one `xfce4-terminal` window with one tab per session, titled with the session's name. Background sessions come back as normal tabs in the foreground. Once installed it runs by itself: a systemd user timer takes a snapshot every 3 minutes, and an XDG autostart entry restores at login. It never reboots anything.
+`reboot-resume.py` (in this skill's folder; stdlib Python 3) records the sessions running on this machine and reopens them after a restart, in one `xfce4-terminal` window with one tab per session, titled with the session's name. Background sessions come back as normal tabs in the foreground. Once installed it runs by itself: a systemd user timer takes a snapshot every 3 minutes, and an XDG autostart entry restores at login. It never reboots anything.
 
 Run `python3 <skill folder>/reboot-resume.py <command>` before it is installed. After `install`, the same commands are available from `~/.local/share/reboot-resume/reboot-resume.py`.
 
@@ -23,11 +23,11 @@ Run `python3 <skill folder>/reboot-resume.py <command>` before it is installed. 
 
 ## What it records
 
-- **Interactive sessions:** the running ones, from `claude agents --json` and `~/.claude/sessions/` (either is enough). Their flags come from the process command line. A session you close drops out of the next snapshot.
-- **Background sessions:** from `~/.claude/jobs/*/state.json`, using `respawnFlags`, even when the background daemon has died. A job's folder stays on disk after it finishes, so a background session that is not running is recorded only if its transcript changed in the last 7 days (`background_max_age_days` in the config). The dry run lists the older ones as skipped. To keep a background session out of later restores before then, use `exclude`; each restored tab prints the command when it ends.
+- **Only running sessions.** A session is recorded only if it runs when the snapshot is taken. A session you close drops out of the next snapshot.
+- **Interactive sessions:** from `claude agents --json` and `~/.claude/sessions/` (either is enough). Their flags come from the process command line.
+- **Background sessions:** a job in `~/.claude/jobs/*/state.json` counts only while its session runs: either a live session has its id, or a `claude` process names it with `--resume` or `--session-id`. Its flags come from that process, or from the job's `respawnFlags`. A job's folder stays on disk after it finishes, or after its daemon has died, and such jobs are never recorded, however recent they are. The dry run lists them as "not running at snapshot time".
 - **Folder:** `claude --resume` finds a transcript by the current folder. So the folder is the cwd recorded in the transcript whose encoding matches the transcript's project folder, which may be a git worktree the session moved into. If none exists, the session's own folder is used and the dry run notes it.
 - **Flags and model:** a session without `--model` gets the model its transcript last used. All other options are kept as the session had them, minus the ones that pick or start a session (`--resume`, `--continue`, `--session-id`, `--bg`, `--worktree`, `--print` and similar). A prompt given on the command line is never kept, so a restore does not send it again.
-- **Duplicates:** when a session was resumed as a new copy under the same name, only the newest copy is restored.
 - **Nothing secret:** a snapshot holds ids, names, folders, flags and models, never the environment or tokens.
 - **User services:** running services from the user's own unit files are listed in the dry run with whether they are enabled. Restore never starts them.
 
