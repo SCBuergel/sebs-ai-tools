@@ -77,6 +77,16 @@
       "license": "MIT"
     },
     {
+      "name": "reboot-resume",
+      "source": "./skills/reboot-resume",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Persist every running Claude Code session on a Linux machine, interactive and background, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
+      "author": { "name": "Sebastian C. Bürgel" },
+      "license": "MIT"
+    },
+    {
       "name": "safe-bash",
       "source": "./hooks/safe-bash",
       "strict": false,

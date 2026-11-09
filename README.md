@@ -25,6 +25,7 @@ with the same name, so you install only what you want.
 | `review-loop` | Gets everything not pushed yet reviewed by the `commit-reviewer` agent: fixes the findings it returns, resubmits to the same reviewer so that it remembers earlier rounds, and pushes only on `APPROVED`, for at most four rounds. |
 | `review-swarm` | Makes the session the supervisor of a swarm that coordinates through a shared work board instead of messages: reviewer agents audit one area of the repository each, short-lived validators judge and rate their findings, and dev agents fix them in parallel in their own git worktrees, each fix approved by the dev's own `commit-reviewer` and merged by a merge queue that tests the exact rebased commit. Claims are leases, so a stalled agent's work goes to another. Ships the briefs for every role, the board, a test-slot lock, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
 | `reflect` | Runs a retrospective over agent sessions and proposes changes to the setup that ran them: the environment, skills and workflows, never the work itself. A stdlib Python script scores friction in a session together with all its subagents, plus optional orchestration logs, and points to the exact transcript lines; the skill reads only those moments and lists fixes most severe first, each traced to a logged line. It only proposes. Based on the [`reflect`](https://github.com/Teebor-Choka/skills) skill by Teebor-Choka (MIT, licence kept verbatim in `skills/reflect/LICENSE.upstream`), extended for long multi-agent runs. |
+| `reboot-resume` | Records every Claude Code session running on a Linux machine, interactive and background, and reopens them after a restart in one `xfce4-terminal` window, one tab per session, in the folder its transcript belongs to and with the same flags. Once installed, a systemd user timer snapshots every 3 minutes and a login autostart restores, skipping sessions that are already running. A dry run shows the plan first, and `restore --print` gives copy-paste commands instead. It never reboots anything. |
 
 | Agent | What it does |
 | --- | --- |
@@ -49,6 +50,7 @@ claude plugin install commit-reviewer@sebs-ai-tools
 claude plugin install safe-bash@sebs-ai-tools
 claude plugin install review-swarm@sebs-ai-tools
 claude plugin install reflect@sebs-ai-tools
+claude plugin install reboot-resume@sebs-ai-tools
 ```
 
 Inside a running Claude Code session, use the same commands with `/plugin`
@@ -71,6 +73,7 @@ share a name, the name appears twice:
 /review-loop:review-loop
 /review-swarm:review-swarm
 /reflect:reflect
+/reboot-resume:reboot-resume
 ```
 
 ## Get your commits reviewed
@@ -181,6 +184,7 @@ claude plugin marketplace remove sebs-ai-tools
 skills/<skill-name>/SKILL.md       a skill, plus any files it uses
                                    (review-swarm: roles/ briefs, tools/ scripts, tests/, rules.md)
                                    (reflect: scan-sessions.py, tests/, LICENSE.upstream)
+                                   (reboot-resume: reboot-resume.py, tests/)
 agents/<agent-name>/agents/<agent-name>.md
                                    an agent: its instructions under a front matter
 hooks/<hook-name>/hooks/hooks.json a hook: when it runs, plus its script and tests/
