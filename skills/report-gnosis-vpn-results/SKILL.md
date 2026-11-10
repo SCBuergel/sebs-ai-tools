@@ -40,8 +40,9 @@ To render a run locally before pushing: `./gnosis_vpn-bench report RUN`.
 
 ## 2. Provenance in every summary
 
-Every summary you write, including a chat reply, starts with these, read from
-`result.json`:
+If `result.json` has a top-level `warnings` entry, every summary you write,
+including a chat reply, starts with it, for example "PIX network but no payment
+was taken". Then come these, read from `result.json`:
 
 - client version and package version, which differ; give both
   (`provenance.client.ctl_version`, `.package_version`)
@@ -112,7 +113,9 @@ not in the repository yet:
 ./gnosis_vpn-bench results link REPORT LABEL URL                      # e.g. the Claude-app page
 ```
 
-These commands do not ask (`--ask` makes them). `push` adds each run's
+These commands do not ask (`--ask` makes them). `push` prints `App copy:
+<path>`: a self-contained `report.html` to publish in the Claude app as it
+is (section 6). Never hand-edit it. `push` adds each run's
 recordings and one report over all of them, by default at
 `reports/<run id>/`. It copies only allowlisted files (`result.json`,
 `provenance.json`, `report.html`, `README.md`, `report.json`,
@@ -128,12 +131,28 @@ for an answer.
 
 ## 6. After a run
 
-Give the user a table per exit: rung, clients, total Mbit/s, per-client
-Mbit/s, mean ping and status, with the provenance from section 2 above it.
-Then link the report on GitHub,
-`https://github.com/<owner>/<results-repo>/tree/main/reports/<name>`, once
-pushed. If the user wants a Claude Artifact of the report's `report.html`,
-publish it and attach its link with `results link`.
+After every run:
+
+1. Put any `warnings` and then the provenance at the top, as in section 2.
+2. In chat, give a table per exit. Each row is a rung: clients, total Mbit/s,
+   per-client Mbit/s, mean ping and status. Give each client's idle tunnel
+   ping, recorded before rung 1, next to the table.
+3. Check the `App copy:` file that `results push` printed:
+   - the first block is the overview chart of all ladder results;
+   - per-client system stats are there: CPU mean and max, minimum free RAM,
+     and load;
+   - tables read correctly at phone width, with no column squeezed to one or
+     two characters.
+
+   If a check fails, fix the renderer in gnosis_vpn-bench and
+   `results rebuild`, then check again. Never edit the file.
+4. Publish that file as it is, as a Claude app artifact. When the same
+   report is pushed again, update the artifact you published for it rather
+   than creating a new one.
+5. Give the user the app link and the report's GitHub path, `reports/<name>/`
+   (`https://github.com/<owner>/<results-repo>/tree/main/reports/<name>`).
+   Attach the app link to the report with `results link`.
+6. Offer the HTML file as a download.
 
 ## Privacy
 

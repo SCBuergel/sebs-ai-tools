@@ -13,8 +13,9 @@ cases:
 - **Throwaway VMs** (a new machine for the test): use a bench remote run. It
   creates the VMs, funds them, installs the guards, measures, returns the
   funds and deletes the VMs. `./gnosis_vpn-bench execute RUN` does all of it
-  for every target of the run and tears down even after an error or Ctrl-C;
-  `--keep` keeps the VMs until the deletion timer fires. Each step also
+  for every target of the run and tears down even after an error or Ctrl-C.
+  Machines are destroyed by default. `--keep` keeps the VMs only until the
+  4 h deletion timer fires; it never cancels the timer. Each step also
   runs on its own. Results are pushed before teardown (section 5). Read its
   `docs/runbook.md` first; sections 0, 4 and 6 below still apply.
 - **A server the user names**: install, fund and guard it by hand (sections
@@ -67,10 +68,15 @@ If you are locked out anyway, the user must reboot the machine or run `gnosis_vp
 then `provision RUN`. Provision schedules a deletion timer before the first
 VM exists. It costs money and asks first; pass `--yes` only when the user
 has decided in advance. Change VM sizes, region and client count in the
-run's `run.toml`. Pick the region closest to the exit under test, and say so
-if you deviate from what the user asked for. If a bench step fails, stop and
-show the user its output and `status RUN`; do not create or delete VMs by
-hand around it.
+run's `run.toml`. For an exit not tested before, first run
+`./gnosis_vpn-bench probe-regions --target targets/<t>.toml [--region R ...] --yes`.
+It creates tagged throwaway droplets, measures the RTT to the exit's last
+responding hop, always deletes them, and prints the regions ranked. Plan the run
+in the region it ranks first. It provisions machines, so it needs the user's
+approval like `provision`. For an exit tested before, use the region closest to
+it. Say so if you deviate from what the user asked for. If a bench step
+fails, stop and show the user its output and `status RUN`; do not create or
+delete VMs by hand around it.
 
 **A server the user names:** survey it first.
 ```bash
@@ -150,7 +156,9 @@ Bench modes, run from the bench checkout. On a server the user names add
 heartbeat from section 0 running; on a bench run's VM add `--run RUN --on
 clientN`. `--exit ADDRESS` or `--target NAME` limits a mode to one exit.
 
-- Concurrent 1 → 2 → 3 client ladder: `ladder RUN`.
+- Concurrent 1 → 2 → 3 client ladder: `ladder RUN`. `--passes N` repeats it
+  N times. Each pass keeps its own raw data and result, and every pass is
+  pushed. Before rung 1 the ladder records each client's idle tunnel ping.
 - Every exit once: `sweep RUN` on a bench run (`--exit ADDR` for some),
   or `locations --runs 1` over `--ssh`.
 - Speed and ping over time on one exit: `curl [URL]`, `ping`, or `ping-load`.
@@ -159,6 +167,27 @@ clientN`. `--exit ADDRESS` or `--target NAME` limits a mode to one exit.
 `./gnosis_vpn-bench <mode> --help` has the parameters. Bench tests the exit it
 was given, by address; never substitute another exit or a direct download for
 a failed tunnel.
+
+**Exit refusals are capacity, not a bench failure.** When the exit refuses a
+client, report it as the exit's capacity at that moment, for example
+`http_404_register` or no free slot. `connect` succeeds when at least one client
+connects.
+
+**Watch a run with exactly one log watcher.** Bench ends every step with the
+log line `step <name> finished: exit <code>`, and `destroy` is the last one.
+Stop the watcher once `step destroy finished` appears, or at teardown. Then
+confirm that nothing is left running: no watcher, and no droplets or deletion
+timers in `status RUN`. Watchers left running on a finished log have been a
+problem before.
+
+**Post a preliminary results table after each rung.** After each rung the run
+log has one summary line, `rung N: X of Y clients connected; exit slots a/b in
+use`, and one line per client, `rung N <client>: <Mbit/s> Mbit/s, <bytes> bytes,
+complete <bool>, ping <ms> ms`. After each rung, post the table so far in chat,
+labelled preliminary and raw. Give one row per rung with its status, total
+Mbit/s, per-client Mbit/s, bytes and ping, clients connected and exit slots in
+use. Build it from those lines only. The final numbers come from `result.json`
+(the `report-gnosis-vpn-results` skill).
 
 For a tool that drives the client, run each of its commands once, briefly,
 with shortened gaps instead of full multi-hour runs, and report package and
