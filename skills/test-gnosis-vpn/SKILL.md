@@ -68,6 +68,13 @@ If you are locked out anyway, the user must reboot the machine or run `gnosis_vp
 
 ## 1. Get a server
 
+This skill needs a bench checkout that contains commit 4eb776b (branch
+`worktree-execute-teardown-systemexit` until it is merged into `main`):
+check with `git -C ~/gnosis_vpn-bench merge-base --is-ancestor 4eb776b
+HEAD`. On an older checkout, the run log, the pre-flight lines, the `web3`
+line and the HTTP 429 retries below do not exist; tell the user and follow
+that checkout's `docs/runbook.md`.
+
 Run bench as `./gnosis_vpn-bench` from its checkout, whose `.venv` has
 `pip install -e '.[remote]'` (the launcher switches to that `.venv` by
 itself). Before provisioning, check that `./gnosis_vpn-bench config`
@@ -198,10 +205,13 @@ client, report it as the exit's capacity at that moment, for example
 connects.
 
 **Watch a run with exactly one log watcher.** It follows the run's log
-file, to which every step appends its log records and output line by line:
+file, `logs/run.log` in the run directory, to which every step appends its
+log records and output line by line. The run directory is the `directory :`
+line that `plan` prints (by default `~/.local/state/gvpn-bench/runs/<id>/`),
+not a path in the bench checkout:
 
 ```bash
-tail -n 0 -F RUN/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING: '
+tail -n 0 -F RUN_DIR/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING'
 ```
 
 Do not tee a command's output into a file and watch that: it is
@@ -260,11 +270,12 @@ only when the user has approved that run's teardown in advance. Check
 `status RUN` afterwards.
 
 `TEARDOWN FAILED: HTTPError: 429` from `rpc.gnosischain.com` is a rate
-limit, not lost funds. Check that every entry in the run's
-`state/transactions.jsonl` is `confirmed`; reconcile any other first
-(section 4). Then rerun `recover RUN --yes`, which resumes from the
-journal, and then `destroy RUN --yes`. Use `--yes` here only under the
-approval above.
+limit, not lost funds. Look at the run's `state/transactions.jsonl`:
+`confirmed`, `superseded` and `dropped` entries are settled, and `recover`
+reconciles a `pending` one by itself when it resumes, stopping if it cannot
+(section 4). Show the user any `reverted` entry before going on. Then rerun
+`recover RUN --yes`, which resumes from the journal, and then `destroy RUN
+--yes`. Use `--yes` here only under the approval above.
 
 On a server the user names, do it by hand in this order:
 

@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Make a large report.html readable, and scan it before it is published.
+"""Scan a large report.html before it is published, then make it readable.
 
 Usage: inspect-report.py REPORT.html [--scan-only]
 
-Prints the page with every <svg>...</svg> reduced to its <text> labels, so
-the content can be read even when the inline charts make the file too large.
-Then scans the whole file, charts included, for <script> tags, external URLs,
-IPv4 addresses and key-like strings, and prints each finding with its line.
-Well-known public resolvers (ping targets such as 9.9.9.9) are listed as
-expected and not counted.
-Exits 1 when the scan finds anything, 0 when it is clean. Read-only.
+First scans the whole file, charts included, for <script> tags, external
+URLs, IPv4 addresses and key-like strings. Each finding is printed redacted
+(kind, line, length, the first 8 hex digits of its SHA-256), never in full,
+so a real secret does not end up in a transcript. Well-known public
+resolvers (ping targets such as 9.9.9.9) are listed as expected and not
+counted. On any finding it exits 1 and does not print the page.
+
+When the scan is clean (exit 0), it prints the page with every <svg>...</svg>
+reduced to its <text> labels, so the content can be read even when the
+inline charts make the file too large; --scan-only skips that. Read-only.
 """
+import hashlib
 import html
 import re
 import sys
@@ -27,7 +31,7 @@ CHECKS = [
     ("external URL", re.compile(r"\b(?:https?|wss?|ftp)://[^\s\"'<>)]+", re.I)),
     ("IPv4 address", re.compile(r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])")),
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("64-hex secret", re.compile(r"\b(?:0x)?[0-9a-fA-F]{64}\b")),
+    ("hex secret (64+ digits)", re.compile(r"\b(?:0x)?[0-9a-fA-F]{64,}\b")),
     ("token prefix", re.compile(r"\b(?:dop_v1_|ghp_|gho_|github_pat_|sk-ant-|xox[bp]-)[A-Za-z0-9_-]{8,}")),
     ("long base64", re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{48,}={0,2}(?![A-Za-z0-9+/=])")),
 ]
@@ -38,15 +42,17 @@ def labels(match: re.Match) -> str:
     return "[svg: " + " | ".join(t for t in found if t) + "]"
 
 
+def redact(hit: str) -> str:
+    digest = hashlib.sha256(hit.encode()).hexdigest()[:8]
+    return f"{len(hit)} chars, sha256 {digest}"
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     page = open(args[0], encoding="utf-8").read()
-    if "--scan-only" not in args:
-        print(SVG.sub(labels, page))
-        print("=" * 72)
     findings = 0
     for number, line in enumerate(page.splitlines(), 1):
         for name, pattern in CHECKS:
@@ -57,9 +63,15 @@ def main() -> int:
                     print(f"line {number}: public resolver, expected: {hit}")
                     continue
                 findings += 1
-                print(f"line {number}: {name}: {hit[:80]}")
+                print(f"line {number}: {name}: {redact(hit)}")
     print(f"scan: {findings} finding(s) in {len(page):,} bytes")
-    return 1 if findings else 0
+    if findings:
+        print("Not showing the page: tell the user before publishing.")
+        return 1
+    if "--scan-only" not in args:
+        print("=" * 72)
+        print(SVG.sub(labels, page))
+    return 0
 
 
 if __name__ == "__main__":

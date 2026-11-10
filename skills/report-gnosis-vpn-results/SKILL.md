@@ -145,11 +145,13 @@ After every run:
 3. As soon as the first push prints `App copy:`, which is before teardown,
    check that file. With inline charts it is large (about 1.8 MB for 15
    clients), so read it through
-   `python3 -I <skill folder>/scripts/inspect-report.py <App copy>`. That prints the page with each chart
-   reduced to its text labels, then scans the whole file for `<script>`
-   tags, external URLs, IPv4 addresses and key-like strings. It exits 1 when
-   it finds one. Then stop and tell the user (see Privacy), unless the hit
-   is plainly not a secret, such as a number. Check that:
+   `python3 -I <skill folder>/scripts/inspect-report.py <App copy>`. It
+   first scans the whole file for `<script>` tags, external URLs, IPv4
+   addresses and key-like strings. It prints each finding redacted (kind,
+   line, length, a short hash), never in full, and then exits 1 without
+   showing the page: stop and tell the user (see Privacy). Only when the
+   scan is clean does it print the page, with each chart reduced to its
+   text labels. Check that:
    - the first block is the overview chart of all ladder results;
    - per-client system stats are there: CPU mean and max, minimum free RAM,
      and load;
