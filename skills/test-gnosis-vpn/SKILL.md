@@ -14,8 +14,12 @@ cases:
   creates the VMs, funds them, installs the guards, measures, returns the
   funds and deletes the VMs. `./gnosis_vpn-bench execute RUN` does all of it
   for every target of the run and tears down even after an error or Ctrl-C.
-  Machines are destroyed by default. `--keep` keeps the VMs only until the
-  4 h deletion timer fires; it never cancels the timer. Each step also
+  Machines are destroyed by default. `--keep` keeps the VMs until the run's
+  deletion timer deletes them: `deadline_hours` after provisioning, 4 h by
+  default. It never cancels the timer. When the timer fires on a funded,
+  unrecovered run without every identity backup, it leaves the VMs running
+  on purpose and records why in the run's `state/deadline.json`. So a fired
+  timer does not prove the VMs are gone. Each step also
   runs on its own. Results are pushed before teardown (section 5). Read its
   `docs/runbook.md` first; sections 0, 4 and 6 below still apply.
 - **A server the user names**: install, fund and guard it by hand (sections
@@ -69,11 +73,12 @@ then `provision RUN`. Provision schedules a deletion timer before the first
 VM exists. It costs money and asks first; pass `--yes` only when the user
 has decided in advance. Change VM sizes, region and client count in the
 run's `run.toml`. For an exit not tested before, first run
-`./gnosis_vpn-bench probe-regions --target targets/<t>.toml [--region R ...] --yes`.
+`./gnosis_vpn-bench probe-regions --target targets/<t>.toml [--region R ...]`.
 It creates tagged throwaway droplets, measures the RTT to the exit's last
-responding hop, always deletes them, and prints the regions ranked. Plan the run
-in the region it ranks first. It provisions machines, so it needs the user's
-approval like `provision`. For an exit tested before, use the region closest to
+responding hop, always deletes them, and prints the regions ranked. Plan the
+run in the region it ranks first. It provisions machines, so it needs the
+user's approval like `provision`. Add `--yes` only when the user has decided
+in advance. For an exit tested before, use the region closest to
 it. Say so if you deviate from what the user asked for. If a bench step
 fails, stop and show the user its output and `status RUN`; do not create or
 delete VMs by hand around it.
@@ -176,9 +181,14 @@ connects.
 **Watch a run with exactly one log watcher.** Bench ends every step with the
 log line `step <name> finished: exit <code>`, and `destroy` is the last one.
 Stop the watcher once `step destroy finished` appears, or at teardown. Then
-confirm that nothing is left running: no watcher, and no droplets or deletion
-timers in `status RUN`. Watchers left running on a finished log have been a
-problem before.
+confirm that nothing is left running:
+- **No watcher** is left.
+- **No VMs:** `step destroy finished: exit 0`. `destroy` checks with the
+  provider's API, but `status RUN` shows the VMs only as of the last step.
+- **No deletion timer** is left for the run in
+  `systemctl --user list-timers`.
+
+Watchers left running on a finished log have been a problem before.
 
 **Post a preliminary results table after each rung.** After each rung the run
 log has one summary line, `rung N: X of Y clients connected; exit slots a/b in

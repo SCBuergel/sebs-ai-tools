@@ -134,9 +134,11 @@ for an answer.
 After every run:
 
 1. Put any `warnings` and then the provenance at the top, as in section 2.
-2. In chat, give a table per exit. Each row is a rung: clients, total Mbit/s,
-   per-client Mbit/s, mean ping and status. Give each client's idle tunnel
-   ping, recorded before rung 1, next to the table.
+2. In chat, give a table per exit. For a ladder, each row is a rung:
+   clients, total Mbit/s, per-client Mbit/s, mean ping and status. Give each
+   client's idle tunnel ping, recorded before rung 1, next to the table. For a
+   sweep or a check, each row is an exit or check with its status, and its
+   speed and ping where they were measured.
 3. Check the `App copy:` file that `results push` printed:
    - the first block is the overview chart of all ladder results;
    - per-client system stats are there: CPU mean and max, minimum free RAM,
