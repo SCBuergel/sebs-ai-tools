@@ -20,7 +20,7 @@ gnosis_vpn-bench is public.
 
 A **recording** is one run against one exit: in the private results
 repository (`[results] repo` in `~/.config/gvpn-bench/config.toml`) it is
-`runs/<date>-<HHMMSS>Z-<target>-<profile>[-historical]/` with `result.json`,
+`runs/YYYY-MM-DD--HH-MM-SS/` (its measurement start, UTC) with `result.json`,
 `provenance.json`, `report.html`, `README.md` and `charts/`. A **report**
 covers one or more recordings across exits, runs and versions:
 `reports/<name>/`, with `report.json` (`title`, `recordings`, `links`), a
@@ -40,9 +40,11 @@ To render a run locally before pushing: `./gnosis_vpn-bench report RUN`.
 
 ## 2. Provenance in every summary
 
-If `result.json` has a top-level `warnings` entry, every summary you write,
-including a chat reply, starts with it, for example "PIX network but no payment
-was taken". Then come these, read from `result.json`:
+If `result.json` has a top-level `warnings[]` list of `{code, detail}`, every
+summary you write, including a chat reply, starts with those warnings. For
+example, `recover` adds `pix_no_payment` when a run on a PIX network took no
+payment, and prints `WARNING: <result folder>: <detail>`. Then come these, read
+from `result.json`:
 
 - client version and package version, which differ; give both
   (`provenance.client.ctl_version`, `.package_version`)
@@ -117,7 +119,7 @@ These commands do not ask (`--ask` makes them). `push` prints `App copy:
 <path>`: a self-contained `report.html` to publish in the Claude app as it
 is (section 6). Never hand-edit it. `push` adds each run's
 recordings and one report over all of them, by default at
-`reports/<run id>/`. It copies only allowlisted files (`result.json`,
+`reports/YYYY-MM-DD--HH-MM-SS/` (the run's creation time). It copies only allowlisted files (`result.json`,
 `provenance.json`, `report.html`, `README.md`, `report.json`,
 `charts/*.svg`), never logs, and refuses when its scan finds keys, tokens or
 IP addresses, or when the repository is public. Never copy files into the
