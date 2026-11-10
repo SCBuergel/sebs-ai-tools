@@ -105,7 +105,8 @@ client version.
 and before its machines are torn down.** The user decided this standing rule
 on 2026-10-31, and bench does it: `ladder` and `sweep` push right after
 writing their results, and `execute` pushes after each target and once more
-with all of the run's results before `recover` and `destroy`. Do not pass
+with all of the run's results before `recover` and `destroy`. `recover`
+records what the run spent and pushes again, before any VM is deleted. Do not pass
 `--no-push` unless the user asks. Push by hand only when a run's results are
 not in the repository yet:
 
@@ -141,7 +142,14 @@ After every run:
    client's idle tunnel ping, recorded before rung 1, next to the table. For a
    sweep or a check, each row is an exit or check with its status, and its
    speed and ping where they were measured.
-3. Check the `App copy:` file that `results push` printed:
+3. As soon as the first push prints `App copy:`, which is before teardown,
+   check that file. With inline charts it is large (about 1.8 MB for 15
+   clients), so read it through
+   `python3 -I <skill folder>/scripts/inspect-report.py <App copy>`. That prints the page with each chart
+   reduced to its text labels, then scans the whole file for `<script>`
+   tags, external URLs, IPv4 addresses and key-like strings. It exits 1 when
+   it finds one. Then stop and tell the user (see Privacy), unless the hit
+   is plainly not a secret, such as a number. Check that:
    - the first block is the overview chart of all ladder results;
    - per-client system stats are there: CPU mean and max, minimum free RAM,
      and load;
@@ -150,13 +158,17 @@ After every run:
 
    If a check fails, fix the renderer in gnosis_vpn-bench and
    `results rebuild`, then check again. Never edit the file.
-4. Publish that file as it is, as a Claude app artifact. When the same
-   report is pushed again, update the artifact you published for it rather
-   than creating a new one.
-5. Give the user the app link and the report's GitHub path, `reports/<name>/`
+4. Publish that file as it is, as a Claude app artifact, right away. Do not
+   wait for the end of the run. At the same time, send the file itself with
+   `SendUserFile` (display: attach), so the user can download it in the
+   Claude mobile app.
+5. `recover` re-renders the report with the payment data and pushes it
+   again. Check the new `App copy:` as in step 3. Then republish it to the
+   same artifact rather than creating a new one, and send the file again.
+   Do the same whenever the same report is pushed again.
+6. Give the user the app link and the report's GitHub path, `reports/<name>/`
    (`https://github.com/<owner>/<results-repo>/tree/main/reports/<name>`).
    Attach the app link to the report with `results link`.
-6. Offer the HTML file as a download.
 
 ## Privacy
 

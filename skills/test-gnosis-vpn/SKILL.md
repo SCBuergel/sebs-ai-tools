@@ -68,6 +68,12 @@ If you are locked out anyway, the user must reboot the machine or run `gnosis_vp
 
 ## 1. Get a server
 
+Run bench as `./gnosis_vpn-bench` from its checkout, whose `.venv` has
+`pip install -e '.[remote]'` (the launcher switches to that `.venv` by
+itself). Before provisioning, check that `./gnosis_vpn-bench config`
+shows `ok` on its `web3` line. Without web3, funding and recovery fail
+after the VMs exist.
+
 **Throwaway VMs:** `./gnosis_vpn-bench plan --profile PROFILE --target TARGET`,
 then `provision RUN`. Provision schedules a deletion timer before the first
 VM exists. It costs money and asks first; pass `--yes` only when the user
@@ -82,7 +88,18 @@ has decided in advance. It ends with "All probe droplets deleted (no droplet
 with tag … is left)." If it ends with `PROBE DROPLETS NOT DELETED: …` (exit 1,
 also in its log) instead, tell the user at once. For an exit tested before,
 use the region closest to it. Say so if you deviate from what the user asked
-for. If a bench step fails, stop and show the user its output and `status
+for.
+
+**Before provisioning**, `provision` and `execute` print `pre-flight:
+droplet limit …` and `pre-flight: funding …`. They refuse before any
+droplet exists when the account has no room for `clients + 1` droplets or
+the funding Safe cannot cover `clients ×` the profile's `[funding]`
+estimate. Show the user the shortfall. Topping up the Safe, for example
+from its owner account, moves funds: do it only with the user's go-ahead.
+When the user asks for more clients mid-session, that is a new run: `plan`,
+set `clients` and `rungs` in its `run.toml`, then `execute`.
+
+If a bench step fails, stop and show the user its output and `status
 RUN`; do not create or delete VMs by hand around it.
 
 **A server the user names:** survey it first.
@@ -180,12 +197,22 @@ client, report it as the exit's capacity at that moment, for example
 `http_404_register` or no free slot. `connect` succeeds when at least one client
 connects.
 
-**Watch a run with exactly one log watcher.** Bench ends every step with the
-log line `step <name> finished: exit <code>`. The last one is
-`step destroy finished` when the steps run one by one, and `step execute
-finished` for `execute`, which recovers and destroys inside itself. Stop the
-watcher once either appears, or at teardown. Then
-confirm that nothing is left running:
+**Watch a run with exactly one log watcher.** It follows the run's log
+file, to which every step appends its log records and output line by line:
+
+```bash
+tail -n 0 -F RUN/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING: '
+```
+
+Do not tee a command's output into a file and watch that: it is
+block-buffered, so lines arrive only when the command exits. If the
+watcher expires, re-arm the same one rather than starting a second.
+
+Bench ends every step with the log line `step <name> finished: exit <code>`.
+The last one is `step destroy finished` when the steps run one by one, and
+`step execute finished` for `execute`, which recovers and destroys inside
+itself. Stop the watcher once either appears, or at teardown. Then confirm
+that nothing is left running:
 - **No watcher** is left.
 - **No VMs:** the provider's API confirmed it, with "Deleted and verified
   gone." from `destroy` or "All droplets of this run are deleted (verified
@@ -231,6 +258,13 @@ Both move funds or delete machines and ask first, and without a terminal
 they refuse unless given `--yes`. Pass `--yes`, to these or to `execute`,
 only when the user has approved that run's teardown in advance. Check
 `status RUN` afterwards.
+
+`TEARDOWN FAILED: HTTPError: 429` from `rpc.gnosischain.com` is a rate
+limit, not lost funds. Check that every entry in the run's
+`state/transactions.jsonl` is `confirmed`; reconcile any other first
+(section 4). Then rerun `recover RUN --yes`, which resumes from the
+journal, and then `destroy RUN --yes`. Use `--yes` here only under the
+approval above.
 
 On a server the user names, do it by hand in this order:
 
