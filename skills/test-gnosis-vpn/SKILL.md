@@ -75,14 +75,15 @@ has decided in advance. Change VM sizes, region and client count in the
 run's `run.toml`. For an exit not tested before, first run
 `./gnosis_vpn-bench probe-regions --target NAME [--region R]... [--id ID]`.
 It creates tagged throwaway droplets, measures the RTT to the exit's last
-responding hop, always deletes them, and prints the regions ranked. Plan the
-run in the region it ranks first. It provisions machines, so like `provision`
-it asks first; add `--yes` only when the user has decided in advance. It ends
-with "All probe droplets deleted (no droplet with tag … is left)." If it ends
-with `PROBE DROPLETS NOT DELETED: …` (exit 1) instead, tell the user at once. For an exit tested before, use the region closest to
-it. Say so if you deviate from what the user asked for. If a bench step
-fails, stop and show the user its output and `status RUN`; do not create or
-delete VMs by hand around it.
+responding hop, and prints the regions ranked. On every path it deletes every
+droplet with its tag. Plan the run in the region it ranks first. It provisions
+machines, so like `provision` it asks first; add `--yes` only when the user
+has decided in advance. It ends with "All probe droplets deleted (no droplet
+with tag … is left)." If it ends with `PROBE DROPLETS NOT DELETED: …` (exit 1,
+also in its log) instead, tell the user at once. For an exit tested before,
+use the region closest to it. Say so if you deviate from what the user asked
+for. If a bench step fails, stop and show the user its output and `status
+RUN`; do not create or delete VMs by hand around it.
 
 **A server the user names:** survey it first.
 ```bash
@@ -180,8 +181,10 @@ client, report it as the exit's capacity at that moment, for example
 connects.
 
 **Watch a run with exactly one log watcher.** Bench ends every step with the
-log line `step <name> finished: exit <code>`, and `destroy` is the last one.
-Stop the watcher once `step destroy finished` appears, or at teardown. Then
+log line `step <name> finished: exit <code>`. The last one is
+`step destroy finished` when the steps run one by one, and `step execute
+finished` for `execute`, which recovers and destroys inside itself. Stop the
+watcher once either appears, or at teardown. Then
 confirm that nothing is left running:
 - **No watcher** is left.
 - **No VMs:** the provider's API confirmed it, with "Deleted and verified
