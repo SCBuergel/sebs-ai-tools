@@ -756,10 +756,10 @@ def additions_block(name, a, base, b):
 
 
 def resolve_conflicts(wt, files):
-    """Resolve the conflicts the queue may resolve by itself; returns the set of kinds used ("imports",
-    "additions"), or None when any conflict is of another kind. Import conflicts keep both sides' import
+    """Resolve the conflicts the queue may resolve by itself; returns {file: set of kinds used}
+    ("imports", "additions"), or None when any conflict is of another kind. Import conflicts keep both sides' import
     lines; in a test file, a conflict where both sides only added lines keeps ours, then theirs."""
-    kinds = set()
+    kinds = {}
     for name in files:
         p = os.path.join(wt, name)
         try:
@@ -771,9 +771,9 @@ def resolve_conflicts(wt, files):
             return None
         for a, base, b in blocks:
             if import_block(a, b):
-                kinds.add("imports")
+                kinds.setdefault(name, set()).add("imports")
             elif additions_block(name, a, base if "||||||| " in body else None, b):
-                kinds.add("additions")
+                kinds.setdefault(name, set()).add("additions")
             else:
                 return None
 
@@ -851,9 +851,10 @@ def merge_one(f, c):
             return (f"rebase conflict on swarm-review {old[:9]} in {' '.join(files) or '?'}: rebase, "
                     "get it re-approved, resubmit")
         run("add", "--", *files)
-        resolved |= kinds
-        if "additions" in kinds:
-            added_in |= set(files)
+        for name, k in kinds.items():
+            resolved |= k
+            if "additions" in k:  # only these files' context may differ from the approved change
+                added_in.add(name)
         step = rebase("--continue")
     else:
         run("rebase", "--abort")
