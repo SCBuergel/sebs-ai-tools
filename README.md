@@ -26,6 +26,8 @@ with the same name, so you install only what you want.
 | `review-swarm` | Makes the session the supervisor of a swarm that coordinates through a shared work board instead of messages: reviewer agents audit one area of the repository each, short-lived validators judge and rate their findings, and dev agents fix them in parallel in their own git worktrees, each fix approved by the dev's own `commit-reviewer` and merged by a merge queue that tests the exact rebased commit. Claims are leases, so a stalled agent's work goes to another. Ships the briefs for every role, the board, a test-slot lock, and a terminal and a web dashboard. Needs `review-loop` and `commit-reviewer`. |
 | `reflect` | Runs a retrospective over agent sessions and proposes changes to the setup that ran them: the environment, skills and workflows, never the work itself. A stdlib Python script scores friction in a session together with all its subagents, plus optional orchestration logs, and points to the exact transcript lines; the skill reads only those moments and lists fixes most severe first, each traced to a logged line. It only proposes. Based on the [`reflect`](https://github.com/Teebor-Choka/skills) skill by Teebor-Choka (MIT, licence kept verbatim in `skills/reflect/LICENSE.upstream`), extended for long multi-agent runs. |
 | `reboot-resume` | Records the Claude Code sessions running on a Linux machine, interactive and background, and reopens them after a restart in one `xfce4-terminal` window, one tab per session, in the folder its transcript belongs to and with the same flags. Once installed, a systemd user timer snapshots every 3 minutes and a login autostart restores, skipping sessions that are already running. A dry run shows the plan first, and `restore --print` gives copy-paste commands instead. It never reboots anything. |
+| `secret-store` | Gets an API token, key or password from the user into a private file without it passing through the chat. The user runs a small script that asks with the input hidden, or takes the secret from the clipboard; it stores the secret in a mode-600 file and prints only its length and a hash prefix. Agents then read it from that file inside the command that uses it. If a secret was pasted into the chat anyway, the agent stores it, never repeats it, and suggests rotating it. |
+| `ephemeral-cloud-run` | Rents a cloud machine (a GPU or a large VM) for one job and makes sure nothing keeps billing. The user agrees a hardware allowlist, a price cap and a time cap first. The skill then probes the token's list, delete and create permissions with harmless calls before renting anything. The machine is deleted on every exit path and verified gone, and an independent deadline (a systemd user timer) deletes it if the run cannot. Results are copied back as they appear, every step is timed, and provider quirks are kept in a reference file. The job itself is up to you. |
 
 | Agent | What it does |
 | --- | --- |
@@ -51,6 +53,8 @@ claude plugin install safe-bash@sebs-ai-tools
 claude plugin install review-swarm@sebs-ai-tools
 claude plugin install reflect@sebs-ai-tools
 claude plugin install reboot-resume@sebs-ai-tools
+claude plugin install secret-store@sebs-ai-tools
+claude plugin install ephemeral-cloud-run@sebs-ai-tools
 ```
 
 Inside a running Claude Code session, use the same commands with `/plugin`
@@ -74,6 +78,8 @@ share a name, the name appears twice:
 /review-swarm:review-swarm
 /reflect:reflect
 /reboot-resume:reboot-resume
+/secret-store:secret-store
+/ephemeral-cloud-run:ephemeral-cloud-run
 ```
 
 ## Get your commits reviewed

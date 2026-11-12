@@ -61,7 +61,7 @@
       "source": "./skills/review-swarm",
       "strict": false,
       "skills": ["./"],
-      "version": "0.6.0",
+      "version": "0.6.1",
       "description": "Run a review swarm that coordinates through a shared work board: reviewers audit one area each, short-lived validators judge their findings, devs fix them in parallel with their own commit-reviewers, and a test-gated merge queue merges each fix, watched on a terminal and a web dashboard.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -83,6 +83,26 @@
       "skills": ["./"],
       "version": "0.2.1",
       "description": "Persist the Claude Code sessions running on a Linux machine, interactive and background, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
+      "author": { "name": "Sebastian C. Bürgel" },
+      "license": "MIT"
+    },
+    {
+      "name": "secret-store",
+      "source": "./skills/secret-store",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Gets an API token, key or password from the user into a private mode-600 file without it passing through the chat, and has agents use it only from that file.",
+      "author": { "name": "Sebastian C. Bürgel" },
+      "license": "MIT"
+    },
+    {
+      "name": "ephemeral-cloud-run",
+      "source": "./skills/ephemeral-cloud-run",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Rents a cloud machine for one job within an agreed hardware allowlist, price and time cap, deletes it on every exit path with an independent deadline as backup, copies results back as they appear, and times every step.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
     },
