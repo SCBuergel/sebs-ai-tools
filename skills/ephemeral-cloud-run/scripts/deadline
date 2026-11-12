@@ -6,19 +6,22 @@ its session or the run script dies.
   deadline cancel NAME                               disarm it (after the run deleted the machine itself)
   deadline list                                      every armed deadline, with its time left
 
-With systemd it is a transient user timer (`systemd-run --user --on-active`), which outlives the session
-that armed it; without systemd it is a detached `setsid` process, which outlives the session but not a
-restart of this machine. When it fires it runs DELETE_COMMAND, up to 5 times 30 s apart until it
-exits 0, and logs each attempt's output and exit code to NAME.fired.log in the state folder. Make
-DELETE_COMMAND idempotent (a machine already gone is success) and read any token from a file inside
-the command, never as an argument: the command is stored in plain text. State lives
-in $DEADLINE_STATE_DIR, by default ~/.local/state/ephemeral-cloud-run/. Python 3 standard library only.
+With systemd it is a transient user timer (`systemd-run --user --on-active`); without systemd it is a
+detached `setsid` process. Both outlive the agent and its session. Neither survives a restart of this
+machine, and the timer also stops with the user's systemd manager, at the end of the user's last login
+session, unless lingering is on (`loginctl enable-linger`; `start` warns when it is off). After such a
+loss, `list` shows the deadline as "overdue, never fired". When it fires it runs DELETE_COMMAND, up to 5
+times 30 s apart until it exits 0, and logs each attempt's output and exit code to NAME.fired.log in the
+state folder. Make DELETE_COMMAND idempotent (a machine already gone is success) and read any token from
+a file inside the command, never as an argument: the command is stored in plain text. State lives in
+$DEADLINE_STATE_DIR, by default ~/.local/state/ephemeral-cloud-run/. Python 3 standard library only.
 """
 import json, os, re, shlex, shutil, signal, subprocess, sys, time
 
 DIR = os.path.expanduser(os.environ.get("DEADLINE_STATE_DIR") or "~/.local/state/ephemeral-cloud-run")
 SELF = os.path.realpath(__file__)
 ATTEMPTS, RETRY_S = 5, float(os.environ.get("DEADLINE_RETRY_S") or 30)
+TIMEOUT_S = 120  # one delete attempt; a hung API call must not block the retries
 
 
 def die(msg, code=2):
@@ -47,21 +50,30 @@ def start(name, seconds, cmd):
     if os.path.exists(p):
         die(f"{name} is already armed; cancel it first")
     os.makedirs(DIR, mode=0o700, exist_ok=True)
-    rec = {"name": name, "cmd": cmd, "armed": time.time(), "due": time.time() + seconds}
+    rec = {"name": name, "cmd": cmd, "armed": time.time(), "due": time.time() + seconds, "how": "arming"}
+    save = lambda: json.dump(rec, open(p, "w"))
+    save()  # before arming, so a deadline that fires at once finds its record
     if use_systemd():
         r = subprocess.run(["systemd-run", "--user", "--quiet", f"--unit={unit(name)}", f"--on-active={seconds}s",
                             "--timer-property=AccuracySec=1s", f"--setenv=DEADLINE_STATE_DIR={DIR}",
                             f"--setenv=DEADLINE_RETRY_S={RETRY_S}", sys.executable, SELF, "fire", name],
                            capture_output=True, text=True)
         if r.returncode:
+            os.unlink(p)
             die(f"systemd-run failed: {r.stderr.strip()}", 1)
         rec["how"] = f"systemd user timer {unit(name)}.timer"
+        linger = subprocess.run(["loginctl", "show-user", str(os.getuid()), "-p", "Linger", "--value"],
+                                capture_output=True, text=True).stdout.strip()
+        if linger != "yes":
+            print("deadline: warning: lingering is off, so this timer stops if the user's last login session "
+                  "ends; `loginctl enable-linger` keeps it. No deadline survives a restart of this machine.",
+                  file=sys.stderr)
     else:
         pid = subprocess.Popen([sys.executable, SELF, "sleep-fire", name, str(seconds)], start_new_session=True,
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid
         rec["how"], rec["pid"] = f"detached process {pid} (does not survive a restart of this machine)", pid
-    with open(p, "w") as f:
-        json.dump(rec, f)
+    if os.path.exists(p):  # not already fired and cleared
+        save()
     print(f"armed {name}: runs `{shlex.join(cmd)}` in {seconds} s, via {rec['how']}")
 
 
@@ -72,12 +84,20 @@ def fire(name):
     except (OSError, ValueError):
         return  # cancelled meanwhile
     for attempt in range(1, ATTEMPTS + 1):  # a provider API can fail for a moment: try a few times
-        r = subprocess.run(rec["cmd"], capture_output=True, text=True)
+        try:
+            r = subprocess.run(rec["cmd"], capture_output=True, text=True, timeout=TIMEOUT_S)
+        except subprocess.TimeoutExpired as e:
+            r = subprocess.CompletedProcess(rec["cmd"], f"timeout after {TIMEOUT_S} s", e.stdout or "", e.stderr or "")
+        except OSError as e:
+            r = subprocess.CompletedProcess(rec["cmd"], f"could not run: {e}", "", "")
         with open(os.path.join(DIR, name + ".fired.log"), "a") as f:
             f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} fired (attempt {attempt}): {shlex.join(rec['cmd'])}\n"
                     f"exit {r.returncode}\n{r.stdout[-2000:]}{r.stderr[-2000:]}\n")
         if r.returncode == 0:
-            os.unlink(p)
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
             return
         time.sleep(RETRY_S)
 
@@ -109,8 +129,11 @@ def main(a):
             if n.endswith(".json"):
                 rec = json.load(open(os.path.join(DIR, n)))
                 left = int(rec["due"] - time.time())
-                print(f"{rec['name']}  {'due in ' + str(left) + ' s' if left > 0 else 'overdue (its delete failed: see ' + rec['name'] + '.fired.log)'}"
-                      f"  {rec['how']}  {shlex.join(rec['cmd'])}")
+                fired = os.path.exists(os.path.join(DIR, rec["name"] + ".fired.log"))
+                when = (f"due in {left} s" if left > 0 else
+                        f"overdue: its delete failed, see {rec['name']}.fired.log" if fired else
+                        "overdue, never fired: the timer was lost (a restart or logout); delete the machine now")
+                print(f"{rec['name']}  {when}  {rec['how']}  {shlex.join(rec['cmd'])}")
     elif a[:1] == ["fire"] and len(a) == 2:
         fire(a[1])
     elif a[:1] == ["sleep-fire"] and len(a) == 3:

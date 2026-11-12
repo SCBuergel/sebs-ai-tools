@@ -19,7 +19,7 @@ def test_stores_privately_and_never_prints_the_value(tmp_path):
     assert "s3cr3t-value" not in r.stdout + r.stderr
     assert f"12 characters, sha256 {hashlib.sha256(b's3cr3t-value').hexdigest()[:8]}" in r.stdout
     f = tmp_path / "s" / "api-token"
-    assert f.read_text() == "s3cr3t-value\n"
+    assert f.read_text() == "s3cr3t-value"
     assert stat.S_IMODE(f.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "s").stat().st_mode) == 0o700
     assert run(tmp_path, "--path", "api-token").stdout.strip() == str(f)
@@ -35,3 +35,20 @@ def test_refuses_bad_names_and_empty_secrets(tmp_path):
     assert not (tmp_path / "s" / "ok").exists()
     assert run(tmp_path, "ok", "extra").returncode == 2
     assert run(tmp_path, "--rm", "missing").returncode == 1
+
+
+def test_keeps_spaces_and_drops_only_one_line_ending(tmp_path):
+    assert run(tmp_path, "p", stdin=" pass word \n").returncode == 0
+    assert (tmp_path / "s" / "p").read_text() == " pass word "
+
+
+def test_clipboard(tmp_path):
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    for tool in ("wl-paste", "xclip", "xsel"):  # fakes for every tool, so a real one is never used
+        (bin_ / tool).write_text("#!/bin/sh\nprintf 'from-clip'\n")
+        (bin_ / tool).chmod(0o755)
+    env = {**os.environ, "SECRET_STORE_DIR": str(tmp_path / "s"), "PATH": f"{bin_}:/usr/bin:/bin"}
+    r = subprocess.run([sys.executable, SCRIPT, "c", "--clipboard"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "s" / "c").read_text() == "from-clip" and "from-clip" not in r.stdout

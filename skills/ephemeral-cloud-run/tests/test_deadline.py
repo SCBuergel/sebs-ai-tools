@@ -65,3 +65,20 @@ def test_with_systemd_it_is_a_user_timer(tmp_path):
     r = run(tmp_path, "start", name, "1", "--", "touch", str(mark), systemd=True)
     assert r.returncode == 0 and f"deadline-{name}.timer" in r.stdout
     assert wait_for(lambda: mark.exists() and not (tmp_path / "st" / f"{name}.json").exists(), 15)
+
+
+def test_list_tells_a_lost_deadline_from_a_failed_delete(tmp_path):
+    # a deadline whose timer was lost (a restart) never fired: no fired.log
+    assert run(tmp_path, "start", "m4", "3600", "--", "true").returncode == 0
+    rec = tmp_path / "st" / "m4.json"
+    data = __import__("json").loads(rec.read_text())
+    data["due"] = time.time() - 5
+    rec.write_text(__import__("json").dumps(data))
+    assert "never fired" in run(tmp_path, "list").stdout
+    run(tmp_path, "cancel", "m4")
+
+
+def test_a_deadline_due_at_once_still_fires(tmp_path):
+    mark = tmp_path / "deleted"
+    assert run(tmp_path, "start", "m5", "0", "--", "touch", str(mark)).returncode == 0
+    assert wait_for(lambda: mark.exists() and not (tmp_path / "st" / "m5.json").exists())

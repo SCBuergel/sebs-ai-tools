@@ -22,6 +22,8 @@ folder is mode 700 and each file mode 600.
 
 After storing, it prints the name, the length and the first 8 hex digits of
 the value's SHA-256, so the user can check that the right value arrived.
+The file holds the value exactly: one line ending from the prompt or pipe is
+dropped, nothing else, and no newline is added.
 
 ## Steps
 

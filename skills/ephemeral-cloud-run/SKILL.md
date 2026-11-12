@@ -16,7 +16,12 @@ independent deadline: `deadline start NAME SECONDS -- <delete command>`
 arms a systemd user timer (or, without systemd, a detached process). It
 runs the delete command even if the agent, its session or the run script
 dies; `deadline cancel NAME` disarms it, and `deadline list` shows what is
-armed. `references/providers.md` has the provider quirks seen so far.
+armed. It lives on this machine, so it does not survive a restart of this
+machine. Without lingering (`loginctl enable-linger`, which `start` warns
+about) it also stops when the user's last login session ends. Keep this
+machine up and logged in during a run. After a restart, run `deadline list`
+first: a deadline shown as "never fired" means its machine may still be
+billing, so delete it at once. `references/providers.md` has the provider quirks seen so far.
 
 ## 1. Agree the job's limits with the user
 
@@ -43,11 +48,15 @@ one fails:
 
 - **List or catalogue:** can the token read offers, sizes, regions and
   prices? (A list call.)
-- **Delete:** can it delete? Delete something that does not exist, such as
-  a made-up id, and expect "not found", not "forbidden". A token that can
-  create but not delete must never rent.
+- **Delete:** can it delete? Where the provider lists a token's scopes or
+  permissions, read them. Otherwise delete something that does not exist,
+  such as a made-up id: "forbidden" proves the token cannot delete, but
+  "not found" proves it only on APIs that check permission before looking
+  the id up, so then also delete the harmless object from the create probe
+  below. A token that can create but not delete must never rent.
 - **Create:** can it create? Use the cheapest harmless object the provider
-  has, for example an SSH key, which you then delete again. Some providers
+  has, for example an SSH key, which you then delete again (that delete is
+  also the real delete probe). Some providers
   also need one on the account before an image boots with SSH.
 
 Then pick the offer: allowlisted hardware only, under the price cap, from
