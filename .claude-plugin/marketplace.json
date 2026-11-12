@@ -41,7 +41,7 @@
       "name": "commit-reviewer",
       "source": "./agents/commit-reviewer",
       "strict": false,
-      "version": "0.1.2",
+      "version": "0.1.3",
       "description": "Independent read-only reviewer agent: give it a commit range and it answers APPROVED or NOT APPROVED with findings, after reading the repository's AI guide and running its tests.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -51,7 +51,7 @@
       "source": "./skills/review-loop",
       "strict": false,
       "skills": ["./"],
-      "version": "0.1.2",
+      "version": "0.1.3",
       "description": "Send the latest local commits to the reviewer session running next to this one, fix its findings, resubmit, and push only on APPROVED.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
@@ -61,7 +61,7 @@
       "source": "./skills/review-swarm",
       "strict": false,
       "skills": ["./"],
-      "version": "0.5.0",
+      "version": "0.6.0",
       "description": "Run a review swarm that coordinates through a shared work board: reviewers audit one area each, short-lived validators judge their findings, devs fix them in parallel with their own commit-reviewers, and a test-gated merge queue merges each fix, watched on a terminal and a web dashboard.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"

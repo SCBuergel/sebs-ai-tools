@@ -1,24 +1,65 @@
 #!/usr/bin/env bash
-# tlock [--as NAME] COMMAND...: run a test command in one of the swarm's test slots.
+# tlock [--as NAME] [--heavy] [--fresh] COMMAND...: run a test command in one of the swarm's test slots.
 #
 # Waits for a free slot (the number is in slots/count, or SWARM_TEST_SLOTS), runs the command under a
 # memory cap (SWARM_TEST_MEM, default 2G, through systemd-run; without systemd-run the command runs
 # uncapped and a warning says so) and records the holder in slots/1.json, slots/2.json, ... for the
 # dashboards. NAME (or $SWARM_AGENT) says who runs it, e.g. dev2, dev2-reviewer or final-reviewer.
 # Every agent starts every test run through this, so at most that many runs share the machine.
+#
+# --heavy runs it in the separate heavy class instead: its own slots (slots/heavy-count, default 1),
+# its own cap (SWARM_HEAVY_MEM, default 8G), holders in slots/heavy/N.json. A job that needs a large
+# cap (a long build, a render, a mutation run) then does not force the plain test slots down to one.
+#
+# Cached passes: when the worktree is clean, a run that passes (rc 0) is recorded under cache/, keyed
+# by the commit's tree, the directory within the worktree, the class and the command. The same command
+# on the same tree later passes at once without running: tlock prints whose run it reuses and where
+# that run's output is, and logs "cached". Failures are never cached, so a rerun of a failure runs
+# again. --fresh (or SWARM_TEST_FRESH=1) always runs and does not read the cache; use it for a check
+# that depends on anything outside the tree.
+#
 # It logs each run as `test` events for the dashboards' activity view: "wait" when no slot is free,
-# "start slot=N CMD", "end slot=N rc=RC took=Ss head=SHA", or "gave up waiting" when it is stopped before a
-# slot. head is the commit the run tested (with "+dirty" for uncommitted changes). While it waits it touches
-# state/NAME.beat, so the board counts the wait as a sign of life.
+# "start slot=N CMD", "end slot=N rc=RC took=Ss head=SHA", "cached head=SHA by=NAME", or "gave up
+# waiting" when it is stopped before a slot (heavy slots show as slot=hN). head is the commit the run
+# tested (with "+dirty" for uncommitted changes). While it waits it touches state/NAME.beat, so the
+# board counts the wait as a sign of life.
 set -u
 S=$(dirname "$(realpath "$0")")
-MEM=${SWARM_TEST_MEM:-2G}
 AS=${SWARM_AGENT:-}
-if [ "${1:-}" = --as ]; then AS=${2:-}; shift 2 || shift; fi
+HEAVY= FRESH=${SWARM_TEST_FRESH:-}
+while :; do
+	case "${1:-}" in
+		--as) AS=${2:-}; shift 2 || shift ;;
+		--heavy) HEAVY=1; shift ;;
+		--fresh) FRESH=1; shift ;;
+		*) break ;;
+	esac
+done
+[ "$FRESH" = 0 ] && FRESH=
+if [ -n "$HEAVY" ]; then MEM=${SWARM_HEAVY_MEM:-8G}; else MEM=${SWARM_TEST_MEM:-2G}; fi
 if [ -z "$AS" ]; then  # without a name: the worktree folder under the swarm folder (dev2), as dash.py's slots() names it
 	case "$PWD/" in "$S"/*) AS=${PWD#"$S"/}; AS=${AS%%/*} ;; *) AS=$(basename "$PWD") ;; esac
 fi
 ev() { "$S/ev" "$AS" test - "$@" 2>/dev/null || true; }
+head=$(git rev-parse HEAD 2>/dev/null || echo none)
+[ -z "$(git status --porcelain 2>/dev/null)" ] || head="$head+dirty"
+key=
+case "$head" in
+	none|*+dirty) ;;
+	*) key=$(printf '%s\0%s\0%s\0' "$(git rev-parse 'HEAD^{tree}')" "$(git rev-parse --show-prefix)" "${HEAVY:+heavy}" \
+		| cat - <(printf '%s\0' "$@") | sha256sum | cut -c1-32) ;;
+esac
+if [ -n "$key" ] && [ -z "$FRESH" ] && [ -s "$S/cache/$key.json" ]; then
+	by=$(python3 - "$S/cache/$key.json" "$*" <<'PY'
+import json, sys, time
+c = json.load(open(sys.argv[1]))
+print(f"tlock: cached pass, not run again: `{sys.argv[2]}` passed on this tree (commit {c['head'][:12]}) "
+      f"in {c['agent']}'s run of {time.strftime('%H:%M', time.localtime(c['end']))}, {c['took']}s; "
+      f"its output: {c['log']}. Use --fresh to run it anyway.", file=sys.stderr)
+print(c["agent"])
+PY
+) && { ev cached head="$head" by="$by"; exit 0; }
+fi
 trap 'exit 130' INT; trap 'exit 143' TERM HUP  # stopped while waiting: the EXIT trap logs "gave up waiting"
 waiting=
 run() {  # run in the background, so exec: the job's pid is the test command itself and a signal reaches it
@@ -29,29 +70,51 @@ run() {  # run in the background, so exec: the job's pid is the test command its
 		exec "$@"
 	fi
 }
+if [ -n "$HEAVY" ]; then mkdir -p "$S/slots/heavy"; fi
 while :; do
-	N=${SWARM_TEST_SLOTS:-$(cat "$S/slots/count" 2>/dev/null || echo 1)}  # reread, so a changed count reaches waiting runs
+	if [ -n "$HEAVY" ]; then
+		N=$(cat "$S/slots/heavy-count" 2>/dev/null || echo 1)
+	else
+		N=${SWARM_TEST_SLOTS:-$(cat "$S/slots/count" 2>/dev/null || echo 1)}  # reread, so a changed count reaches waiting runs
+	fi
 	for i in $(seq 1 "$N"); do
-		f="$S/test.lock"; [ "$i" -eq 1 ] || f="$S/test.lock.$i"
+		if [ -n "$HEAVY" ]; then f="$S/heavy.lock.$i" slotfile="$S/slots/heavy/$i.json" label="h$i"
+		else f="$S/test.lock"; [ "$i" -eq 1 ] || f="$S/test.lock.$i"; slotfile="$S/slots/$i.json" label=$i; fi
 		exec {fd}>"$f"
 		if flock -n "$fd"; then
 			start=$(date +%s)
-			head=$(git rev-parse HEAD 2>/dev/null || echo none)
-			[ -z "$(git status --porcelain 2>/dev/null)" ] || head="$head+dirty"
 			trap - EXIT
-			ev start slot="$i" "$@"
+			ev start slot="$label" "$@"
 			python3 -c 'import json, sys; print(json.dumps({"slot": int(sys.argv[1]), "pid": int(sys.argv[2]), '\
 '"start": int(sys.argv[3]), "cwd": sys.argv[4], "agent": sys.argv[5], "cmd": " ".join(sys.argv[6:])}))' \
-				"$i" $$ "$start" "$PWD" "$AS" "$@" > "$S/slots/$i.json"
+				"$i" $$ "$start" "$PWD" "$AS" "$@" > "$slotfile"
+			out=
+			if [ -n "$key" ]; then mkdir -p "$S/cache"; out="$S/cache/$key.$$.log"; fi
 			# In the background, so that a signal to tlock is passed on to the test command at once; tlock
-			# then waits for it to end and logs its real exit code.
-			run "$@" <&0 & child=$!
+			# then waits for it to end and logs its real exit code. With a cache key, both output streams
+			# are also copied to a log that a cached pass points to.
+			if [ -n "$out" ]; then
+				run "$@" <&0 > >(tee -a "$out") 2> >(tee -a "$out" >&2) & child=$!
+			else
+				run "$@" <&0 & child=$!
+			fi
 			trap 'kill -TERM $child 2>/dev/null' TERM INT HUP
 			while :; do
 				wait "$child"; rc=$?
 				kill -0 "$child" 2>/dev/null || break
 			done
-			rm -f "$S/slots/$i.json"; ev end slot="$i" rc=$rc took=$(( $(date +%s) - start ))s head="$head"; exit "$rc"
+			took=$(( $(date +%s) - start ))
+			rm -f "$slotfile"; ev end slot="$label" rc=$rc took=${took}s head="$head"
+			if [ -n "$out" ]; then
+				if [ "$rc" -eq 0 ]; then
+					python3 -c 'import json, sys, time; print(json.dumps({"head": sys.argv[1], "agent": sys.argv[2], '\
+'"took": int(sys.argv[3]), "end": int(time.time()), "log": sys.argv[4], "cmd": " ".join(sys.argv[5:])}))' \
+						"$head" "$AS" "$took" "$out" "$@" > "$S/cache/$key.json.tmp" && mv "$S/cache/$key.json.tmp" "$S/cache/$key.json"
+				else
+					rm -f "$out"
+				fi
+			fi
+			exit "$rc"
 		fi
 		exec {fd}>&-
 	done

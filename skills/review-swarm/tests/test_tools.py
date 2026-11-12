@@ -260,3 +260,99 @@ def test_amend_appends_to_the_requirements_and_logs_it(tmp_path):
     assert text.endswith("by supervisor, replacing anything above that it contradicts:\nOption 1 stays allowed.\n")
     last = json.loads((sw / "events.jsonl").read_text().splitlines()[-1])
     assert (last["agent"], last["kind"], last["id"]) == ("supervisor", "amend", "R1-1")
+
+
+def test_a_stopped_event_never_closes_a_new_pass(tmp_path):
+    _, sw = init_swarm(tmp_path, "true", "--until-clean", "2")
+    board = load_board(sw)
+    board.cmd_pass("R1", "start")
+    ev(sw, "R1", "done", "-", "pass 1")
+    board.tick()
+    assert board.passes()["R1"] == ["clean"]
+    board.cmd_pass("R1", "start")
+    # the pass-1 agent ends after pass 2 started: pass 2 stays open
+    ev(sw, "R1", "stopped", "-", "pass-1 agent stopped")
+    out = board.tick()
+    assert board.passes()["R1"] == ["clean", "started"]
+    assert any(l.startswith("QUIET reviewer R1") for l in out)
+    ev(sw, "R1", "focus", "-", "pass 2 agent")
+    assert not any(l.startswith("QUIET reviewer R1") for l in board.tick())
+    # only pass 2's own done closes it
+    ev(sw, "R1", "done", "-", "pass 2")
+    board.tick()
+    assert board.passes()["R1"] == ["clean", "finished"]
+
+
+def tlock(sw, *args, cwd=None):
+    return subprocess.run([str(sw / "tlock"), "--as", "dev1", *args], cwd=cwd or sw / "dev1",
+                          capture_output=True, text=True, env={**os.environ, "SWARM_TEST_MEM": "1G"})
+
+
+def test_tlock_reuses_a_pass_on_the_same_tree_but_never_a_failure(tmp_path):
+    _, sw = init_swarm(tmp_path, "true")
+    count = tmp_path / "runs"
+    cmd = ["sh", "-c", f'echo run >> {count}; echo out; test -e {tmp_path}/fail && exit 1; exit 0']
+    assert tlock(sw, *cmd).returncode == 0
+    second = tlock(sw, *cmd)
+    assert second.returncode == 0 and "cached pass" in second.stderr
+    assert count.read_text().count("run") == 1
+    assert "out" in open(second.stderr.split("its output: ")[1].split(". Use")[0]).read()
+    assert tlock(sw, "--fresh", *cmd).returncode == 0 and count.read_text().count("run") == 2
+    # another tree runs again; a failure is not cached
+    dev_commit(sw, "X = 5\n")
+    (tmp_path / "fail").touch()
+    assert tlock(sw, *cmd).returncode == 1 and tlock(sw, *cmd).returncode == 1
+    assert count.read_text().count("run") == 4
+    # an uncommitted change is never cached
+    (tmp_path / "fail").unlink()
+    (sw / "dev1" / "src" / "m.py").write_text("X = 6\n")
+    assert tlock(sw, *cmd).returncode == 0 and tlock(sw, *cmd).returncode == 0
+    assert count.read_text().count("run") == 6
+    assert '"cached"' not in (sw / "events.jsonl").read_text()  # the kind stays "test"
+    assert "cached head=" in (sw / "events.jsonl").read_text()
+
+
+def test_tlock_heavy_uses_its_own_slots(tmp_path):
+    _, sw = init_swarm(tmp_path, "true")
+    # hold the only plain test slot: a heavy run still gets its own
+    hold = subprocess.Popen(["flock", str(sw / "test.lock"), "sleep", "30"])
+    try:
+        __import__("time").sleep(0.3)
+        r = tlock(sw, "--heavy", "--fresh", "true")
+        assert r.returncode == 0
+        assert "start slot=h1" in (sw / "events.jsonl").read_text()
+    finally:
+        hold.kill()
+
+
+def add_test_file(repo, sw, name):
+    (repo / name).parent.mkdir(parents=True, exist_ok=True)
+    (repo / name).write_text("import m\n\n\ndef test_base():\n    assert m.X\n")
+    git("add", ".", cwd=repo)
+    git("commit", "-qm", "base tests", cwd=repo)
+    git("checkout", "-q", "-B", "swarm-dev1", "swarm-review", cwd=sw / "dev1")
+
+
+@pytest.mark.parametrize("name,theirs_def,merged", [
+    ("tests/test_m.py", "def test_other():", True),    # both only added, in a test file: both kept
+    ("src/helpers.py", "def test_other():", False),    # not a test file: back to the dev
+    ("tests/test_m.py", "def test_new():", False),     # the same test name added twice: back to the dev
+])
+def test_a_conflict_where_both_sides_only_added_lines(tmp_path, monkeypatch, name, theirs_def, merged):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    repo, sw = init_swarm(tmp_path, "true")
+    add_test_file(repo, sw, name)
+    base = (repo / name).read_text()
+    sha = set_line(sw, name, base + "\n\ndef test_new():\n    assert m.X == 1\n", "[R1-1] new test")
+    (repo / name).write_text(base + f"\n\n{theirs_def}\n    assert m.X > 0\n")
+    git("commit", "-qam", "[R2-1] other test", cwd=repo)
+    board = load_board(sw)
+    why = board.merge_one({"id": "R1-1", "sha": sha}, board.cfg())
+    if merged:
+        assert why is None
+        body = git("show", f"HEAD:{name}", cwd=sw / "merge")
+        assert "def test_other():" in body and "def test_new():" in body and "<<<<" not in body
+        assert body.index("test_other") < body.index("test_new")  # swarm-review's lines first
+        assert "the change's own lines are unchanged" in (sw / "events.jsonl").read_text()
+    else:
+        assert why.startswith("rebase conflict")

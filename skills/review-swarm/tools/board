@@ -30,6 +30,7 @@ dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, 
   board tick                         supervisor: release dead claims, close passes, print what to do
   board watch                        supervisor: wait until tick has something new to do, print it, exit
   board show [ID]                    the board, or one finding's history
+  board progress                     per area and pass, the valid findings by severity (for the final report)
   board mergeq                       the merge queue: runs until stopped (the supervisor starts it once)
 
 A claim is a lease: it stays the owner's while the owner, or the owner's commit-reviewer, logged an event
@@ -529,9 +530,17 @@ def tick():
     areas = [f"R{i}" for i in range(1, c["reviewers"] + 1)]
     for a in areas:
         ps = passes().get(a, [])
-        started = [e["t"] for e in evs if e["kind"] == "pass" and e["msg"].startswith(f"{a} {len(ps)} started")]
-        since = started[-1] if started else 0
-        done = any(e["agent"] == a and e["kind"] in ("done", "stopped") and e["t"] >= since for e in evs)
+        # A pass closes only on its own reviewer's `done`, logged after the pass started (by log
+        # position, not time). A `stopped`, for example from the previous pass's agent ending after the
+        # new pass started, never closes it.
+        starts = [i for i, e in enumerate(evs) if e["kind"] == "pass" and e["agent"] in ("board", "dispatcher", "supervisor")
+                  and e["msg"].startswith(f"{a} {len(ps)} started")]
+        since = starts[-1] if starts else -1
+        after = [e for e in evs[since + 1:] if e["agent"] == a]
+        done = any(e["kind"] == "done" for e in after)
+        if not done and after and after[-1]["kind"] == "stopped" and (not ps or ps[-1] == "started"):
+            out.append(f"QUIET reviewer {a}: its agent stopped without `done` in pass {len(ps) or 1}; start a fresh "
+                       f"{a} with this pass's TREE, or `board pass {a} stop`")
         mine = [f for f in fs.values() if f.get("area") == a and f.get("pass", 1) == max(len(ps), 1)]
         closed = all(f["state"] in FINAL for f in mine)
         if until == 0:
@@ -637,6 +646,29 @@ def cmd_show(fid):
               f"{text(f['id']).get('title', '')[:70]}")
 
 
+def cmd_progress():
+    """A table: per area and pass, its valid findings by severity, findings not judged yet, the pass's state."""
+    fs, ps = findings(), passes()
+    rows = {}
+    for f in fs.values():
+        if not re.fullmatch(r"R\d+", f.get("area", "")):
+            continue
+        r = rows.setdefault(f["area"], {}).setdefault(f.get("pass", 1), [{}, 0])
+        if f["state"] in ("reported", "validating"):
+            r[1] += 1
+        elif f["state"] not in ("invalid", "duplicate") and f.get("severity"):
+            r[0][f["severity"]] = r[0].get(f["severity"], 0) + 1
+    for a, states in ps.items():
+        for n in range(1, len(states) + 1):
+            rows.setdefault(a, {}).setdefault(n, [{}, 0])
+    print(f"{'area':<5} {'pass':>4}  " + " ".join(f"{k:>8}" for k in RANK) + f"  {'unjudged':>8}  state")
+    for a in sorted(rows, key=lambda a: int(a[1:])):
+        for n, (c, u) in sorted(rows[a].items()):
+            st = ps.get(a, [])[n - 1] if n <= len(ps.get(a, [])) else "-"
+            cells = " ".join(f"{c.get(k, 0) or '-':>8}" for k in RANK)
+            print(f"{a:<5} {n:>4}  {cells}  {u or '-':>8}  {st}" + ("  (none valid)" if not c and not u else ""))
+
+
 def cmd_flag(name, val):
     if name not in ("wind-down", "paused") or val not in ("on", "off"):
         die("usage: board flag wind-down|paused on|off")
@@ -658,8 +690,13 @@ def git(*a, cwd=None):
 IMPORT_RE = re.compile(r"\s*(import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*"
                        r"|from\s+[.\w]+\s+import\s+[\w*]+(\s+as\s+\w+)?(\s*,\s*\w+(\s+as\s+\w+)?)*"
                        r"|import\s.+\sfrom\s+['\"][^'\"]+['\"];?)\s*")
-CONFLICT_RE = re.compile(r"^<<<<<<< [^\n]*\n(.*?)(?:^\|\|\|\|\|\|\| [^\n]*\n.*?)?^=======\n(.*?)^>>>>>>> [^\n]*\n",
+# One conflict block: ours, the base (with merge.conflictStyle=diff3; None without it), theirs.
+CONFLICT_RE = re.compile(r"^<<<<<<< [^\n]*\n(.*?)(?:^\|\|\|\|\|\|\| [^\n]*\n(.*?))?^=======\n(.*?)^>>>>>>> [^\n]*\n",
                          re.S | re.M)
+# Test files, where a conflict in which both sides only added lines is resolved by keeping both.
+TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$")
+# A line that starts a definition: two sides adding the same one would make one shadow the other.
+DEF_RE = re.compile(r"\s*(async\s+)?(def|class|function)\s+\w+|\s*(it|test|describe)\s*\(\s*['\"`]")
 
 
 def only_imports(lines):
@@ -699,27 +736,51 @@ def clashes(ours, theirs):
     return any(n in b and b[n] != a[n] for n in a)
 
 
-def resolve_imports(wt, files):
-    """Resolve conflicts that are only in import lines by keeping both sides. False if any is not."""
+def import_block(a, b):
+    return only_imports((a + b).splitlines()) and not clashes(a.splitlines(), b.splitlines())
+
+
+def additions_block(name, a, base, b):
+    """Both sides only added lines at the same place in a test file, and no definition is added twice."""
+    if base is None or base.strip() or not TEST_PATH_RE.search(name):
+        return False
+    heads = lambda t: {l.strip() for l in t.splitlines() if DEF_RE.match(l)}
+    return not heads(a) & heads(b)
+
+
+def resolve_conflicts(wt, files):
+    """Resolve the conflicts the queue may resolve by itself; returns the set of kinds used ("imports",
+    "additions"), or None when any conflict is of another kind. Import conflicts keep both sides' import
+    lines; in a test file, a conflict where both sides only added lines keeps ours, then theirs."""
+    kinds = set()
     for name in files:
         p = os.path.join(wt, name)
         try:
             body = open(p).read()
         except (OSError, UnicodeDecodeError):
-            return False
+            return None
         blocks = CONFLICT_RE.findall(body)
-        if not blocks or any(not only_imports((a + b).splitlines()) or clashes(a.splitlines(), b.splitlines())
-                             for a, b in blocks):
-            return False
+        if not blocks:
+            return None
+        for a, base, b in blocks:
+            if import_block(a, b):
+                kinds.add("imports")
+            elif additions_block(name, a, base if "||||||| " in body else None, b):
+                kinds.add("additions")
+            else:
+                return None
 
-        def union(m):
-            ours = m.group(1).splitlines(keepends=True)
-            return "".join(ours + [l for l in m.group(2).splitlines(keepends=True) if l not in ours])
-        body = CONFLICT_RE.sub(union, body)
+        def keep(m):
+            a, b = m.group(1), m.group(3)
+            ours = a.splitlines(keepends=True)
+            if import_block(a, b):
+                return "".join(ours + [l for l in b.splitlines(keepends=True) if l not in ours])
+            return a + b
+        body = CONFLICT_RE.sub(keep, body)
         if "<<<<<<< " in body:
-            return False
+            return None
         open(p, "w").write(body)
-    return True
+    return kinds
 
 
 def change_without_imports(cwd, a, b):
@@ -729,6 +790,14 @@ def change_without_imports(cwd, a, b):
     d = subprocess.run(["git", "-C", cwd, "diff", a, b], capture_output=True, text=True).stdout
     return [l for l in d.splitlines() if not l.startswith(("@@", "index "))
             and not (l[:1] in " +-" and not l.startswith(("+++", "---")) and IMPORT_RE.fullmatch(l[1:]))]
+
+
+def added_and_removed(cwd, a, b):
+    """Only the lines a..b adds or removes, per file, without context and without import lines: a change
+    whose own lines are the same after a rebase that only put other added lines next to them."""
+    d = subprocess.run(["git", "-C", cwd, "diff", a, b], capture_output=True, text=True).stdout
+    return [l for l in d.splitlines() if l.startswith(("+++", "---"))
+            or (l[:1] in "+-" and not IMPORT_RE.fullmatch(l[1:]))]
 
 
 def patch_id(cwd, a, b):
@@ -759,23 +828,26 @@ def merge_one(f, c):
         return f"could not check out {sha[:9]}"
     old = git("rev-parse", "swarm-review", cwd=wt)
     base = git("merge-base", sha, "swarm-review", cwd=wt)
-    step, resolved = run("rebase", "-q", "swarm-review"), False
+    # diff3 shows each conflict's base, so the queue can tell that both sides only added lines
+    rebase = lambda *a: subprocess.run(["git", "-C", wt, "-c", "merge.conflictStyle=diff3", "-c", "core.editor=true",
+                                        "rebase", *a], capture_output=True, text=True)
+    step, resolved = rebase("-q", "swarm-review"), set()
     for _ in range(100):  # one round per commit of the change that conflicts
         if not step.returncode:
             break
         files = run("diff", "--name-only", "--diff-filter=U").stdout.split()
-        if not files or not resolve_imports(wt, files):
+        kinds = resolve_conflicts(wt, files) if files else None
+        if kinds is None:
             run("rebase", "--abort")
             return (f"rebase conflict on swarm-review {old[:9]} in {' '.join(files) or '?'}: rebase, "
                     "get it re-approved, resubmit")
         run("add", "--", *files)
-        resolved = True
-        step = subprocess.run(["git", "-C", wt, "-c", "core.editor=true", "rebase", "--continue"],
-                              capture_output=True, text=True)
+        resolved |= kinds
+        step = rebase("--continue")
     else:
         run("rebase", "--abort")
         return f"rebase of {sha[:9]} onto {old[:9]} did not finish"
-    if resolved and c.get("import_fix_cmd"):
+    if "imports" in resolved and c.get("import_fix_cmd"):
         fix = subprocess.run(["bash", "-c", c["import_fix_cmd"]], cwd=wt, capture_output=True, text=True)
         if fix.returncode:
             return (f"the import sorter failed (rc={fix.returncode}) after resolving an import conflict on "
@@ -786,10 +858,16 @@ def merge_one(f, c):
     if head == old:
         return "the change is empty on swarm-review (already merged?)"
     if patch_id(wt, base, sha) != patch_id(wt, old, head):
-        # The approval stands when the two versions differ only in import lines.
-        if change_without_imports(wt, base, sha) != change_without_imports(wt, old, head):
+        # The approval stands when the two versions differ only in import lines, or, after the queue
+        # kept both sides' added lines in a test file, when the change's own added and removed lines
+        # are the same.
+        if change_without_imports(wt, base, sha) == change_without_imports(wt, old, head):
+            log("merge-queue", "status", fid, "rebased with only import lines changed; the approval stands")
+        elif "additions" in resolved and added_and_removed(wt, base, sha) == added_and_removed(wt, old, head):
+            log("merge-queue", "status", fid, "rebased next to lines another change added to the same test "
+                "file; the change's own lines are unchanged, so the approval stands")
+        else:
             return "the rebase changed the approved change: rebase it yourself, get it re-approved, resubmit"
-        log("merge-queue", "status", fid, "rebased with only import lines changed; the approval stands")
     log("merge-queue", "status", fid, f"testing {fid} rebased as {head[:9]}")
     logf = os.path.join(S, "mergeq", fid + ".log")
     os.makedirs(os.path.dirname(logf), exist_ok=True)
@@ -887,6 +965,7 @@ def main(a):
             "tick": (0, cmd_tick),
             "watch": (0, cmd_watch),
             "show": (0, lambda: cmd_show(r[0] if r else None)),
+            "progress": (0, cmd_progress),
             "mergeq": (0, cmd_mergeq)}
     if c not in cmds or len(r) < cmds[c][0]:
         die(f"bad command or arguments: {shlex.join(a)}; see the top of {__file__}")

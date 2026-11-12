@@ -35,7 +35,10 @@ Roles, each a subagent started with the Agent tool from the briefs under
   test command on that exact commit, and fast-forwards. A conflict, a failed
   test or a rebase that changed the code sends the card back to its dev; a
   conflict, or a difference, only in import lines it resolves itself, and the
-  approval stands, unless both sides import one name from different places. A
+  approval stands, unless both sides import one name from different places.
+  In a test file, a conflict where both sides only added lines is resolved by
+  keeping both (swarm-review's first), unless both add the same definition;
+  the approval stands when the change's own lines are unchanged. A
   failed run is repeated once: tests that fail and then pass send it back as
   `FLAKY`, to be fixed rather than merged.
 - **Dash** (optional): maintains the dashboards on the user's requests. The
@@ -93,6 +96,14 @@ The slot count can be changed while the swarm runs: `echo 4 > $SW/slots/count`
 applies to every test run that is waiting for a slot or starts afterwards.
 Raise it when the dashboard's load stays below the CPU count while slots are
 all busy; lower it when load goes red or memory amber.
+
+Jobs that need much more memory than the test suite (a long build, a
+render, a mutation run) go through `tlock --heavy`, a separate class with
+its own slots (`$SW/slots/heavy-count`, 1 by default) and its own cap
+(`SWARM_HEAVY_MEM`, 8G by default). So one large cap does not force the
+test slots down to one. `tlock` also reuses a pass: the same command on the
+same committed tree passes at once, so the commit-reviewer and the merge
+queue do not rerun the suite on a commit the dev already tested.
 
 Split the task into areas by trust boundary or subsystem, so that two
 reviewers do not read the same files for the same question. Name each area
@@ -208,6 +219,12 @@ tick` yourself.
   changed: it starts with no memory of earlier passes, so what earlier
   reviewers learned does not steer it. Record it in `ids.txt` as `R3-p<p>
   <id>`. The board itself logs when a pass is clean, not clean or finished.
+- `QUIET reviewer R3`: the area's reviewer stopped without logging `done`
+  in the running pass. A pass closes only on its own reviewer's `done`, so
+  a `stopped` from an earlier pass's agent, or from one that died, never
+  closes it as clean. If the running pass's agent is alive, ignore the
+  line; if not, start a fresh R3 with the pass's `TREE`, or `$SW/board pass
+  R3 stop`.
 - `START validator V<k>`: findings wait and fewer validators than configured
   are alive. Start one with that name.
 - `START merge queue`: changes wait and no merge queue is running. Start it
@@ -244,6 +261,10 @@ every change. The stages are `setup`, `reviewing`, `paused`, `wind-down`,
 without merging). Whenever you stop an agent (TaskStop) or find its session
 gone, log `$SW/ev <agent> stopped - "<why>"`.
 
+When the user asks how far the swarm is, answer from `$SW/board progress`:
+each area's valid findings by severity, pass by pass. The dashboards show
+the same as their Passes row.
+
 ## 6. Finish
 
 1. Stop starting agents. Log `stage - "final-review ..."`. If `swarm.json`
@@ -279,8 +300,10 @@ gone, log `$SW/ev <agent> stopped - "<why>"`.
    worktree. If the worktrees are gone anyway, run `swarm-init` again with the
    same options on `swarm-review`; it recreates the missing ones.
 6. Report: what was pushed, every finding with its outcome (`$SW/board
-   show`), what the wind-down left open, the optional items reviewers left,
-   and what the local tests could not verify.
+   show`), the per-pass table from `$SW/board progress` (each area's valid
+   findings by severity, pass by pass, so the reader sees whether the areas
+   converged), what the wind-down left open, the optional items reviewers
+   left, and what the local tests could not verify.
 
 ## Taking over a swarm
 

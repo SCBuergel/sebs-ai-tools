@@ -37,7 +37,9 @@ to someone else, and your next board command about it is refused: drop it and ru
   skill), then submits it to the merge queue.
 - The merge queue (`board mergeq`, agent name merge-queue): rebases each approved change onto
   `swarm-review`, runs the full test command on that exact commit, and fast-forwards `swarm-review`.
-  A conflict, a failed test or a rebase that changed the code sends the card back to the dev (revise).
+  A conflict, a failed test or a rebase that changed the code sends the card back to the dev (revise). It
+  resolves two kinds of conflict itself: one only in import lines, and, in a test file, one where both sides
+  only added lines (both are kept), unless both add the same definition.
 - The supervisor (the session that started the swarm): owner decisions, the test infrastructure,
   starting agents and replacing dead ones, and the final whole-branch review. It does not judge findings
   and does not pass messages between agents.
@@ -53,7 +55,7 @@ or failing tests) do not count toward that.
   `swarm-review` when the pass starts. Validators judge a finding against the tree it names. Nobody edits
   these trees.
 - $SW/dev1..$SW/dev{{N_DEV}}: one worktree per dev, on branch `swarm-dev1`..`swarm-dev{{N_DEV}}`. A dev edits,
-  tests and commits only in its own worktree.
+  tests and commits only in its own worktree. Nobody uses `git stash`: all worktrees share one stash.
 - $SW/merge: the merge queue's worktree. Nobody else touches it.
 - {{REPO}} on branch `swarm-review`: the integration tree. Read it with `git log`, `git diff` and
   `git show`. Only the merge queue changes it; nobody edits, switches branches, pushes or resets here.
@@ -94,13 +96,29 @@ Never edit derived totals by hand, such as test counts in the docs. {{REGEN}}
   `devN-reviewer`): it waits for a free test slot (there are {{SLOTS}} at the start; the number is in
   slots/count and may change), runs the command under a memory cap, and records the holder. One command
   per run; a run may wait for another agent's. Never start a test run any other way.
+- tlock records every passing run on a clean committed tree. The same command on the same tree (the same
+  directory in the worktree) then passes at once and says whose run it reuses and where that run's output
+  is; a failure is never reused. So a commit-reviewer's or the merge queue's run of a commit the dev
+  already tested costs nothing. `tlock --fresh` always runs; use it for a check that depends on something
+  outside the tree.
+- A job that needs a large memory cap (a long build, a render, a mutation run) goes through
+  `$SW/tlock --heavy`: its own slots (slots/heavy-count, 1 by default) and cap (SWARM_HEAVY_MEM, 8G by
+  default), so the plain test slots keep their small cap and their number.
+- Devs run only the tests covering their change while iterating, and the full test command once on the
+  committed change before the review loop.
 - Full test command (test_cmd in swarm.json): {{TEST_CMD}}
 - Interpreter: {{PY}}
 - When a test fails, do not rerun the whole suite to see whether it is flaky. Rerun only the failing test,
   once. If it passes then, it is flaky: say `FLAKY: <test>` in your status and treat it as a failure to
   fix, never as a pass. The merge queue does the same: it reruns a failed suite once and sends a change
   whose tests fail and then pass back as FLAKY.
-- A commit-reviewer reruns the test suite itself, but repeats a slow extra check (for example a
-  mutation run) only for a check changed in the range; the dev's commit messages list the others.
+- A commit-reviewer reruns the test suite itself (through tlock, which reuses the dev's pass on the same
+  commit), but repeats a slow extra check (for example a mutation run) only for a check changed in the
+  range; the dev's commit messages list the others.
+- A change that produces an artifact (an image, a page, a generated file) comes with a cheap automated
+  smoke check of the artifact, not only of the code; a commit-reviewer looks at the artifact's check.
+- A check that uses up a quota or has side effects outside the machine (sign-ins, paid API calls,
+  messages, deployments) is never part of the test command or of any loop; it runs only when the user
+  asks for it.
 - Never run commands that change the machine or anything outside the worktrees: no provisioning,
   deployment, deletion or hardware steps, whatever the repository's guide says about them.

@@ -36,6 +36,14 @@ Then, for the given range:
    the claim is that a test detects the change, confirm it by reading the
    test, not by trusting the commit message. Respect any resource limits the
    guide or your instructions set for test runs.
+   When the change produces or changes an artifact (an image, a page, a
+   generated file or report), check that an automated smoke check covers
+   the artifact itself, not only the code that makes it (it exists, is not
+   empty, has the expected format, size and key content), and run it. A
+   change whose output only a person's eyes would check is a finding.
+   A check that uses up a quota or acts outside the machine (sign-ins, paid
+   API calls, messages, deployments) must be opt-in: one that runs in the
+   default test command or in a repeated loop is a finding.
 4. Check that the documentation the change affects describes the new
    behaviour and nothing that no longer exists.
 5. Never claim that behaviour was tested on a platform the local harness

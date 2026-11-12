@@ -318,6 +318,7 @@ section > header h2 { white-space: nowrap; }
         <div class="legend"><span data-tip="<b>Agreed</b><br>Fixed, approved by the dev's commit-reviewer, merged into swarm-review by the merge queue, and confirmed by the reporting reviewer (or a validator standing in for it)."><i style="background:var(--good)"></i>agreed</span><span data-tip="<b>In pipeline</b><br>Validated but not agreed yet: queued for a dev, being fixed, or being checked."><i style="background:var(--violet);opacity:.75"></i>in pipeline</span><span data-tip="<b>Unresolved</b><br>The verifier refused the fix three times, or the dev found no fix path. Needs the user."><i style="background:var(--critical)"></i>unresolved</span><span data-tip="<b>Total</b><br>Agreed findings out of all validated ones. Rejected and duplicate findings do not count."><i style="background:var(--line)"></i><span id="barlabel"></span></span></div>
       </div>
       <div class="chips" id="chips"></div>
+      <div class="chips" id="passchips"></div>
     </div>
   </section>
 
@@ -485,7 +486,7 @@ const KIND = {
   verdict: 'A dev\'s commit-reviewer gave its verdict on the change: APPROVED <sha> or NOT APPROVED.',
   merged: 'swarm-review was fast-forwarded to this tested, approved change (by the merge queue; by ffmerge in 0.3 swarms).',
   stopped: 'The agent ended (or the supervisor stopped it, or found its session gone); it does no more work until a new agent of that name reports.',
-  test: 'A test run through tlock: waiting for a slot (wait), holding one (start slot=N), finished (end slot=N rc=…), or gave up waiting.',
+  test: 'A test run through tlock: waiting for a slot (wait), holding one (start slot=N, or slot=hN in a heavy slot), finished (end slot=N rc=…), a pass reused from an earlier run of the same command on the same tree (cached), or gave up waiting.',
   pass: 'Repeated passes (logged by the board): a fresh reviewer took an area over (started), a pass ended (clean, not clean), or the area is finished or stopped.',
 };
 // Stages of the whole swarm: `ev supervisor stage - "<stage> <detail>"` (dispatcher in 0.3 logs).
@@ -613,7 +614,8 @@ function stateOf() {
     if (a.startsWith('R')) st.done = st.done || k === 'done'; else st.busy = !['idle', 'done'].includes(k);
     if (k === 'reported') st.n++;
     if (i) {
-      const f = findings[i] ||= {state:'reported', sev:'', title:'', round:0, by:i.split('-')[0], t:e.t, hist:[], last:null, dev:'', steps:[], phases:[]};
+      const f = findings[i] ||= {state:'reported', sev:'', title:'', round:0, by:i.split('-')[0], t:e.t, hist:[], last:null, dev:'', steps:[], phases:[],
+                                 pass: (passes[i.split('-')[0]] || {}).pass || 1};  // the pass running when it was reported
       if (!order.includes(i)) order.push(i);
       if (k === 'reported') f.title = e.msg;
       if (k === 'phase') {
@@ -633,6 +635,31 @@ function stateOf() {
     }
   }
   return {agents, focus, findings, order, notes, stage, passes};
+}
+
+// Per area, each pass's valid findings by severity: whether the areas are converging. A closed pass with no
+// valid finding shows "none"; an open one ends in … and its count of findings not judged yet.
+function passChips(findings, passes) {
+  const rows = {};
+  for (const f of Object.values(findings)) {
+    if (!/^R\d+$/.test(f.by)) continue;
+    const r = (rows[f.by] ||= {})[f.pass] ||= {c: {}, u: 0};
+    if (['reported', 'validating'].includes(f.state)) r.u++;
+    else if (!['invalid', 'duplicate'].includes(f.state) && f.sev) r.c[f.sev] = (r.c[f.sev] || 0) + 1;
+  }
+  for (const [a, p] of Object.entries(passes)) if (/^R\d+$/.test(a)) for (let n = 1; n <= p.pass; n++) (rows[a] ||= {})[n] ||= {c: {}, u: 0};
+  const areas = Object.keys(rows).sort((x, y) => +x.slice(1) - +y.slice(1));
+  if (!areas.length || !Object.keys(passes).length) return '';
+  return '<span class="muted" data-tip="<b>Passes</b><br>For each area, the valid findings of each review pass by severity (C, H, M, L, I). A finding counts for the pass that was running when it was reported. Areas converge when later passes find less: none means a closed pass with no valid finding; … marks the running pass, with its findings not judged yet.">Passes</span> ' +
+    areas.map(a => {
+      const cur = passes[a] || {pass: 1, state: 'running'};
+      const cells = Object.keys(rows[a]).map(Number).sort((x, y) => x - y).map(n => {
+        const {c, u} = rows[a][n], closed = n < cur.pass || cur.state !== 'running';
+        const sev = Object.keys(SEV).filter(s => c[s]).map(s => `<span style="color:${SEV[s]}">${s[0]}${c[s]}</span>`).join(' ');
+        return `${n}:${sev || (closed && !u ? '<span style="color:var(--good)">none</span>' : '')}${closed ? '' : '<span class="muted">…' + (u || '') + '</span>'}`;
+      });
+      return `<span class="chip"><b>${esc(a)}</b>&nbsp;${cells.join(' ')}</span>`;
+    }).join('');
 }
 
 // Findings a validator or the merge queue holds now, from the board's state events.
@@ -739,6 +766,11 @@ function renderMachine(now) {
     rows.push(j ? `<div class="slot" data-tip="<b>Slot ${n}</b> — ${tesc(j.who)}<br>${tesc(j.cmd)}<br>in ${tesc(j.cwd)}, pid ${tesc(j.pid)}"><span>slot ${n}</span><span class="${acls(String(j.who))}">${esc(j.who)}</span><span class="cmd">${esc(j.cmd)}</span><span class="muted pid">pid ${esc(j.pid)}</span><span class="muted">${typeof j.start === 'number' ? ago(j.start, now) : ''}</span></div>`
       : `<div class="slot free" data-tip="<b>Slot ${n}</b><br>Free: no test run holds it."><span>slot ${n}</span><span>free</span><span></span><span class="pid"></span><span></span></div>`);
   }
+  for (let n = 1; n <= (m.heavy_count || 0); n++) {  // tlock --heavy: its own class of slots
+    const j = (m.heavy || []).find(x => x.slot === n);
+    rows.push(j ? `<div class="slot" data-tip="<b>Heavy slot ${n}</b> — ${tesc(j.who)}<br>${tesc(j.cmd)}<br>in ${tesc(j.cwd)}, pid ${tesc(j.pid)}"><span>heavy ${n}</span><span class="${acls(String(j.who))}">${esc(j.who)}</span><span class="cmd">${esc(j.cmd)}</span><span class="muted pid">pid ${esc(j.pid)}</span><span class="muted">${typeof j.start === 'number' ? ago(j.start, now) : ''}</span></div>`
+      : `<div class="slot free" data-tip="<b>Heavy slot ${n}</b><br>Free: tlock --heavy runs go here, with their own memory cap (SWARM_HEAVY_MEM), so they do not hold the test slots."><span>heavy ${n}</span><span>free</span><span></span><span class="pid"></span><span></span></div>`);
+  }
   $('slots').innerHTML = rows.join('');
   $('machbadge').textContent = `${gib(m.mem_avail)} avail · load ${m.load[0].toFixed(2)}/${m.cpus} · ${m.slots.length}/${m.slot_count} slots`;
   $('machbadge').style.color = m.mem_avail < 2 * GIB ? mc : m.load[0] > m.cpus ? lc : '';
@@ -818,7 +850,7 @@ function activity() {
     }
     if (k === 'stopped') { lane(a).stopped = msg || 'stopped'; set(a, null, t); continue; }
     if (k === 'test') {
-      const owner = a.replace(/^(dev\d+)-reviewer$/, '$1'), l = lane(owner), w = msg.split(/\s+/), slot = (msg.match(/slot=(\d+)/) || [])[1];
+      const owner = a.replace(/^(dev\d+)-reviewer$/, '$1'), l = lane(owner), w = msg.split(/\s+/), slot = (msg.match(/slot=(h?\d+)/) || [])[1];
       if (w[0] === 'wait') l.waits[a] = t;
       else if (w[0] === 'start') {
         if (l.waits[a] !== undefined) { l.tests.push({a: l.waits[a], b: t, who: a, wait: true}); delete l.waits[a]; }
@@ -1025,6 +1057,7 @@ function render() {
       `<span class="chip" data-tip="<b>${tesc(s)}</b><br>${sevc[s]} validated finding${sevc[s] === 1 ? '' : 's'} rated ${tesc(s)}."><span class="dot" style="background:${SEV[s] || 'var(--line-2)'}"></span>${esc(s)} <b>${sevc[s]}</b></span>`).join('')
     : '<span class="muted">none confirmed yet</span>');
 
+  $('passchips').innerHTML = passChips(findings, passes);
   renderMachine(now);
   renderActivity(now, roll, lanes, states);
 

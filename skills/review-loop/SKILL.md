@@ -17,7 +17,12 @@ Finish the change, run the repository's tests as its guide requires, and
 commit locally. Chain the check and the commit in one command, `<check> &&
 git commit ...`, so a failing check stops the commit; never run them as
 separate commands in one call, where the commit runs whatever the check
-said. The review covers every commit that is not on the
+said. When the change produces an artifact (an image, a page, a
+generated file), add or run a cheap automated smoke check of the artifact
+itself before committing, so the reviewer and the user are not the first
+to look at the output. Keep checks that use up a quota or act outside the
+machine (sign-ins, paid API calls, deployments) out of the test command
+and out of any loop; run them only when the user asks. The review covers every commit that is not on the
 upstream branch yet: `@{upstream}..HEAD`. If the branch has no upstream,
 use the remote's default branch, for example `origin/main..HEAD`. If that
 range is empty, tell the user there is nothing to review and stop. The user

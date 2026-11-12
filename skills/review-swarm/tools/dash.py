@@ -154,14 +154,15 @@ def meminfo():
     return m
 
 
-def slots():
-    """Test slots: (count, held) where held lists the live $SW/slots/<n>.json; a file whose pid is gone is free."""
+def slots(sub="", count_file="count"):
+    """Test slots: (count, held) where held lists the live $SW/slots/<n>.json; a file whose pid is gone is free.
+    slots("heavy", "heavy-count") reads tlock --heavy's class, in slots/heavy/<n>.json."""
     try:
-        count = int(readt(os.path.join(D, "slots", "count")).strip())
+        count = int(readt(os.path.join(D, "slots", count_file)).strip())
     except ValueError:
         count = 0
     held = []
-    for p in sorted(glob.glob(os.path.join(D, "slots", "*.json"))):
+    for p in sorted(glob.glob(os.path.join(D, "slots", sub, "*.json"))):
         j = readj(p)
         if isinstance(j, dict) and str(j.get("pid", "")).isdigit() and os.path.exists(f"/proc/{j['pid']}"):
             cwd = str(j.get("cwd", ""))
@@ -180,7 +181,11 @@ def machine():
     except ValueError:
         load = [0.0, 0.0, 0.0]
     count, held = slots()
-    return {"mem_total": m.get("MemTotal", 0), "mem_avail": m.get("MemAvailable", 0),
+    hcount, hheld = slots("heavy", "heavy-count")
+    # tlock creates slots/heavy on the first --heavy run; without slots/heavy-count it uses 1 slot
+    return {"heavy_count": (hcount or 1) if os.path.isdir(os.path.join(D, "slots", "heavy")) else 0,
+            "heavy": [{k: j.get(k) for k in ("slot", "pid", "start", "cwd", "cmd", "who", "agent")} for j in hheld],
+            "mem_total": m.get("MemTotal", 0), "mem_avail": m.get("MemAvailable", 0),
             "swap_total": m.get("SwapTotal", 0), "swap_used": m.get("SwapTotal", 0) - m.get("SwapFree", 0),
             "load": load, "cpus": os.cpu_count() or 1, "slot_count": count,
             "slots": [{k: j.get(k) for k in ("slot", "pid", "start", "cwd", "cmd", "who", "agent")} for j in held]}
@@ -325,7 +330,8 @@ def state_of(evs):
             st["n"] += 1
         if i:
             f = findings.setdefault(i, {"state": "reported", "sev": "", "title": "", "round": 0,
-                                         "by": i.split("-")[0], "t": e["t"], "hist": []})
+                                         "by": i.split("-")[0], "t": e["t"], "hist": [],
+                                         "pass": passes.get(i.split("-")[0], {}).get("pass", 1)})
             if i not in order:
                 order.append(i)
             if k == "reported":
@@ -437,7 +443,9 @@ def machine_line(mc, now):
     return (f" Machine  mem {fg(mem_col(ma))}{B}{g(ma)}{R} avail of {g(mc['mem_total'])}"
             f"   swap {g(mc['swap_used'])}/{g(mc['swap_total'])}"
             f"   load {fg(load_col(l1, mc['cpus']))}{B}{l1:.2f}{R}/{mc['cpus']} cpu"
-            f"   slots {B}{len(mc['slots'])}/{mc['slot_count']}{R}" + (f": {held}" if held else " free"))
+            f"   slots {B}{len(mc['slots'])}/{mc['slot_count']}{R}" + (f": {held}" if held else " free")
+            + (f"   heavy {B}{len(mc.get('heavy', []))}/{mc['heavy_count']}{R}"
+               + "".join(f" {B}{j['who']}{R}" for j in mc.get("heavy", [])) if mc.get("heavy_count") else ""))
 
 
 def steps_of(f):
@@ -496,6 +504,51 @@ def agent_state(a, st, findings, sname, now, held):
     return "working", ""
 
 
+def pass_rows(findings, passes):
+    """{area: [(pass, counts by severity of its valid findings, unjudged, closed)]}: how close each area is.
+    A finding belongs to the pass that was running when it was reported."""
+    rows = {}
+    for i, f in findings.items():
+        a, n = f["by"], f.get("pass", 1)
+        r = rows.setdefault(a, {}).setdefault(n, [{}, 0])
+        if f["state"] in ("reported", "validating"):
+            r[1] += 1
+        elif f["state"] not in ("invalid", "duplicate") and f.get("sev"):
+            r[0][f["sev"]] = r[0].get(f["sev"], 0) + 1
+    out = {}
+    for a, p in passes.items():
+        for n in range(1, p["pass"] + 1):
+            rows.setdefault(a, {}).setdefault(n, [{}, 0])
+    for a, by in rows.items():
+        cur = passes.get(a, {"pass": 1, "state": "running"})
+        out[a] = [(n, c, u, n < cur["pass"] or cur["state"] != "running") for n, (c, u) in sorted(by.items())]
+    return out
+
+
+def passes_lines(findings, passes, W):
+    """ Passes  R1 1:H2 M1 2:none 3:…1 | R2 ...: each pass's valid findings by severity, so the user sees the
+    areas converging (a closed pass with no valid finding is "none", an open one ends in … and its unjudged
+    count). Wrapped to the width; the final review's F- findings are left out."""
+    parts = []
+    for a, rows in sorted(pass_rows(findings, passes).items(), key=lambda x: (len(x[0]), x[0])):
+        if not re.fullmatch(r"R\d+", a):
+            continue
+        cells = []
+        for n, c, u, closed in rows:
+            sev = " ".join(fg(SEV.get(k, 240)) + f"{k[0]}{v}" + R for k, v in
+                           sorted(c.items(), key=lambda x: list(SEV).index(x[0]) if x[0] in SEV else 9))
+            cells.append(f"{n}:" + (sev or (fg(46) + "none" + R if closed and not u else ""))
+                         + ("" if closed else DIM + "…" + (str(u) if u else "") + R))
+        parts.append(B + a + R + " " + " ".join(cells))
+    lines, cur = [], " Passes  "
+    for p in parts:
+        if vis(cur) > 9 and vis(cur) + 3 + vis(p) > W:
+            lines.append(cur)
+            cur = " " * 9
+        cur += ("" if vis(cur) == 9 and not cur.strip() or cur == " Passes  " else " | ") + p
+    return lines + [cur] if parts else []
+
+
 NOTE = ""  # a warning shown under the header, e.g. an edited dash.py that was refused
 
 
@@ -541,6 +594,7 @@ def render(evs, tick):
     chips = " ".join(bgc(SEV.get(s, 240)) + fg(16) + B + f" {s} {n} " + R
                      for s, n in sorted(sev_counts.items(), key=lambda x: list(SEV).index(x[0]) if x[0] in SEV else 9))
     out.append(" Severity " + (chips or DIM + "none confirmed yet" + R))
+    out += passes_lines(findings, passes, W)
     mc = machine()
     wt = waiting(evs, mc, now)
     out.append(machine_line(mc, now) + (f"   {fg(208)}{B}{len(wt)} waiting for a slot{R}: {', '.join(wt)}" if wt else ""))
