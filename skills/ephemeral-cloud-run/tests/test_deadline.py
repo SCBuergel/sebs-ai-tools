@@ -11,7 +11,7 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts
 
 
 def run(tmp_path, *args, systemd=False):
-    env = {**os.environ, "DEADLINE_STATE_DIR": str(tmp_path / "st"), "DEADLINE_RETRY_S": "0.2"}
+    env = {**os.environ, "DEADLINE_STATE_DIR": str(tmp_path / "st"), "DEADLINE_RETRY_S": "0.2", "DEADLINE_TIMEOUT_S": "1"}
     if not systemd:
         env["DEADLINE_NO_SYSTEMD"] = "1"
     return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True, env=env)
@@ -82,3 +82,13 @@ def test_a_deadline_due_at_once_still_fires(tmp_path):
     mark = tmp_path / "deleted"
     assert run(tmp_path, "start", "m5", "0", "--", "touch", str(mark)).returncode == 0
     assert wait_for(lambda: mark.exists() and not (tmp_path / "st" / "m5.json").exists())
+
+
+def test_a_hung_delete_times_out_and_is_logged_as_text(tmp_path):
+    assert run(tmp_path, "start", "m6", "0", "--", "sh", "-c", "echo partial; sleep 5").returncode == 0
+    log = tmp_path / "st" / "m6.fired.log"
+    assert wait_for(lambda: log.exists() and "attempt 5" in log.read_text(), 20)
+    text = log.read_text()
+    assert text.splitlines()[0].endswith(" firing")
+    assert "exit timeout after 1.0 s" in text and "partial" in text and "b'" not in text
+    assert "its delete is running or failed" in run(tmp_path, "list").stdout

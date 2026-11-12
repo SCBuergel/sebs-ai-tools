@@ -19,7 +19,8 @@ dies; `deadline cancel NAME` disarms it, and `deadline list` shows what is
 armed. It lives on this machine, so it does not survive a restart of this
 machine. Without lingering (`loginctl enable-linger`, which `start` warns
 about) it also stops when the user's last login session ends. Keep this
-machine up and logged in during a run. After a restart, run `deadline list`
+machine up, logged in and not suspended during a run: the timer's clock
+stops while it sleeps, so a suspend delays the deadline by that long. After a restart, run `deadline list`
 first: a deadline shown as "never fired" means its machine may still be
 billing, so delete it at once. `references/providers.md` has the provider quirks seen so far.
 

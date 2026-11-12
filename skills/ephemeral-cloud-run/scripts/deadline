@@ -21,7 +21,7 @@ import json, os, re, shlex, shutil, signal, subprocess, sys, time
 DIR = os.path.expanduser(os.environ.get("DEADLINE_STATE_DIR") or "~/.local/state/ephemeral-cloud-run")
 SELF = os.path.realpath(__file__)
 ATTEMPTS, RETRY_S = 5, float(os.environ.get("DEADLINE_RETRY_S") or 30)
-TIMEOUT_S = 120  # one delete attempt; a hung API call must not block the retries
+TIMEOUT_S = float(os.environ.get("DEADLINE_TIMEOUT_S") or 120)  # one attempt; a hung API call must not block the retries
 
 
 def die(msg, code=2):
@@ -51,7 +51,11 @@ def start(name, seconds, cmd):
         die(f"{name} is already armed; cancel it first")
     os.makedirs(DIR, mode=0o700, exist_ok=True)
     rec = {"name": name, "cmd": cmd, "armed": time.time(), "due": time.time() + seconds, "how": "arming"}
-    save = lambda: json.dump(rec, open(p, "w"))
+    def save():  # atomic, so a fire due at once never reads a half-written record
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(rec, f)
+        os.replace(tmp, p)
     save()  # before arming, so a deadline that fires at once finds its record
     if use_systemd():
         r = subprocess.run(["systemd-run", "--user", "--quiet", f"--unit={unit(name)}", f"--on-active={seconds}s",
@@ -83,14 +87,18 @@ def fire(name):
         rec = json.load(open(p))
     except (OSError, ValueError):
         return  # cancelled meanwhile
+    log = os.path.join(DIR, name + ".fired.log")
+    with open(log, "a") as f:  # before the first attempt, so `list` never calls a running delete lost
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} firing\n")
     for attempt in range(1, ATTEMPTS + 1):  # a provider API can fail for a moment: try a few times
         try:
             r = subprocess.run(rec["cmd"], capture_output=True, text=True, timeout=TIMEOUT_S)
         except subprocess.TimeoutExpired as e:
-            r = subprocess.CompletedProcess(rec["cmd"], f"timeout after {TIMEOUT_S} s", e.stdout or "", e.stderr or "")
+            text = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
+            r = subprocess.CompletedProcess(rec["cmd"], f"timeout after {TIMEOUT_S} s", text(e.stdout), text(e.stderr))
         except OSError as e:
             r = subprocess.CompletedProcess(rec["cmd"], f"could not run: {e}", "", "")
-        with open(os.path.join(DIR, name + ".fired.log"), "a") as f:
+        with open(log, "a") as f:
             f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} fired (attempt {attempt}): {shlex.join(rec['cmd'])}\n"
                     f"exit {r.returncode}\n{r.stdout[-2000:]}{r.stderr[-2000:]}\n")
         if r.returncode == 0:
@@ -131,7 +139,7 @@ def main(a):
                 left = int(rec["due"] - time.time())
                 fired = os.path.exists(os.path.join(DIR, rec["name"] + ".fired.log"))
                 when = (f"due in {left} s" if left > 0 else
-                        f"overdue: its delete failed, see {rec['name']}.fired.log" if fired else
+                        f"overdue: fired, its delete is running or failed, see {rec['name']}.fired.log" if fired else
                         "overdue, never fired: the timer was lost (a restart or logout); delete the machine now")
                 print(f"{rec['name']}  {when}  {rec['how']}  {shlex.join(rec['cmd'])}")
     elif a[:1] == ["fire"] and len(a) == 2:

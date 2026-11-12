@@ -101,7 +101,7 @@
       "source": "./skills/ephemeral-cloud-run",
       "strict": false,
       "skills": ["./"],
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Rents a cloud machine for one job within an agreed hardware allowlist, price and time cap, deletes it on every exit path with an independent deadline as backup, copies results back as they appear, and times every step.",
       "author": { "name": "Sebastian C. Bürgel" },
       "license": "MIT"
