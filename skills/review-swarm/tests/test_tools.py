@@ -356,3 +356,38 @@ def test_a_conflict_where_both_sides_only_added_lines(tmp_path, monkeypatch, nam
         assert "the change's own lines are unchanged" in (sw / "events.jsonl").read_text()
     else:
         assert why.startswith("rebase conflict")
+
+
+def test_in_one_pass_mode_pass_stop_finishes_a_stopped_area(tmp_path):
+    _, sw = init_swarm(tmp_path, "true")  # --one-pass
+    board = load_board(sw)
+    ev(sw, "R1", "focus", "-", "area")
+    ev(sw, "R1", "stopped", "-", "died")
+    out = board.tick()
+    assert any(l.startswith("QUIET reviewer R1") for l in out) and "areas finished 0/1" in out[-1]
+    board.cmd_pass("R1", "stop")
+    out = board.tick()
+    assert not any(l.startswith("QUIET reviewer R1") for l in out)
+    assert any("areas finished 1/1" in l for l in out) and any(l.startswith("FINISHED") for l in out)
+
+
+def test_the_merge_queue_never_reuses_a_cached_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    count = tmp_path / "runs"
+    _, sw = init_swarm(tmp_path, f"echo run >> {count}")
+    sha = dev_commit(sw, "X = 2\n")
+    assert tlock(sw, "bash", "-c", f"echo run >> {count}").returncode == 0  # the dev's pass, cached
+    board = load_board(sw)
+    assert board.merge_one({"id": "R1-1", "sha": sha}, board.cfg()) is None
+    assert count.read_text().count("run") == 2
+
+
+@pytest.mark.parametrize("ours,theirs,ok", [
+    ("def test_a():", "def test_b():", True),
+    ("LIMIT = 1", "LIMIT = 2", False),           # both bind LIMIT
+    ("def test_a():", "def test_a(x):", False),
+    ("it('works', () => {", "it('works', () => {", False),
+    ("    assert x == 1", "    assert x == 1", True),  # inside a body, not a definition
+])
+def test_additions_refuse_names_defined_on_both_sides(ours, theirs, ok):
+    assert load_board_module().additions_block("tests/test_m.py", ours + "\n", "", theirs + "\n") is ok

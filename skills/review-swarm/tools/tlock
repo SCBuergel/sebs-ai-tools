@@ -14,9 +14,10 @@
 # Cached passes: when the worktree is clean, a run that passes (rc 0) is recorded under cache/, keyed
 # by the commit's tree, the directory within the worktree, the class and the command. The same command
 # on the same tree later passes at once without running: tlock prints whose run it reuses and where
-# that run's output is, and logs "cached". Failures are never cached, so a rerun of a failure runs
-# again. --fresh (or SWARM_TEST_FRESH=1) always runs and does not read the cache; use it for a check
-# that depends on anything outside the tree.
+# that run's output is, and logs a test event "cached head=SHA by=NAME". Failures are never cached, so a
+# rerun of a failure runs again. --fresh (or SWARM_TEST_FRESH=1) always runs and does not read the cache;
+# the merge queue always passes it. A reused pass ran in another worktree, whose ignored files may
+# differ; use --fresh for a check that depends on anything outside the committed tree.
 #
 # It logs each run as `test` events for the dashboards' activity view: "wait" when no slot is free,
 # "start slot=N CMD", "end slot=N rc=RC took=Ss head=SHA", "cached head=SHA by=NAME", or "gave up

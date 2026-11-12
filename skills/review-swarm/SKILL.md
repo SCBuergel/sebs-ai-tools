@@ -102,8 +102,9 @@ render, a mutation run) go through `tlock --heavy`, a separate class with
 its own slots (`$SW/slots/heavy-count`, 1 by default) and its own cap
 (`SWARM_HEAVY_MEM`, 8G by default). So one large cap does not force the
 test slots down to one. `tlock` also reuses a pass: the same command on the
-same committed tree passes at once, so the commit-reviewer and the merge
-queue do not rerun the suite on a commit the dev already tested.
+same committed tree passes at once, so a commit-reviewer does not rerun the
+suite on a commit its dev already tested. The merge queue always runs the
+suite itself (`--fresh`).
 
 Split the task into areas by trust boundary or subsystem, so that two
 reviewers do not read the same files for the same question. Name each area

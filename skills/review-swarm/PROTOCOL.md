@@ -98,9 +98,9 @@ Never edit derived totals by hand, such as test counts in the docs. {{REGEN}}
   per run; a run may wait for another agent's. Never start a test run any other way.
 - tlock records every passing run on a clean committed tree. The same command on the same tree (the same
   directory in the worktree) then passes at once and says whose run it reuses and where that run's output
-  is; a failure is never reused. So a commit-reviewer's or the merge queue's run of a commit the dev
-  already tested costs nothing. `tlock --fresh` always runs; use it for a check that depends on something
-  outside the tree.
+  is; a failure is never reused. So a commit-reviewer's run of a commit the dev already tested costs
+  nothing; the reused run was made in the dev's worktree. `tlock --fresh` always runs; use it for a check
+  that depends on something outside the committed tree. The merge queue always runs fresh.
 - A job that needs a large memory cap (a long build, a render, a mutation run) goes through
   `$SW/tlock --heavy`: its own slots (slots/heavy-count, 1 by default) and cap (SWARM_HEAVY_MEM, 8G by
   default), so the plain test slots keep their small cap and their number.
