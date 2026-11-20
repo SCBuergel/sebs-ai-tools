@@ -2,13 +2,13 @@
 # tlock [--as NAME] [--heavy] [--fresh] COMMAND...: run a test command in one of the swarm's test slots.
 #
 # Waits for a free slot (the number is in slots/count, or SWARM_TEST_SLOTS), runs the command under a
-# memory cap (SWARM_TEST_MEM, default 2G, through systemd-run; without systemd-run the command runs
+# memory cap (SWARM_TEST_MEM, else slots/mem, default 2G, through systemd-run; without systemd-run the command runs
 # uncapped and a warning says so) and records the holder in slots/1.json, slots/2.json, ... for the
 # dashboards. NAME (or $SWARM_AGENT) says who runs it, e.g. dev2, dev2-reviewer or final-reviewer.
 # Every agent starts every test run through this, so at most that many runs share the machine.
 #
 # --heavy runs it in the separate heavy class instead: its own slots (slots/heavy-count, default 1),
-# its own cap (SWARM_HEAVY_MEM, default 8G), holders in slots/heavy/N.json. A job that needs a large
+# its own cap (SWARM_HEAVY_MEM, else slots/heavy-mem, default 8G), holders in slots/heavy/N.json. A job that needs a large
 # cap (a long build, a render, a mutation run) then does not force the plain test slots down to one.
 #
 # Cached passes: when the worktree is clean, a run that passes (rc 0) is recorded under cache/, keyed
@@ -37,11 +37,19 @@ while :; do
 	esac
 done
 [ "$FRESH" = 0 ] && FRESH=
-if [ -n "$HEAVY" ]; then MEM=${SWARM_HEAVY_MEM:-8G}; else MEM=${SWARM_TEST_MEM:-2G}; fi
+# The caps: the environment, else what swarm-init --test-mem/--heavy-mem wrote, else 2G and 8G.
+if [ -n "$HEAVY" ]; then MEM=${SWARM_HEAVY_MEM:-$(cat "$S/slots/heavy-mem" 2>/dev/null || echo 8G)}
+else MEM=${SWARM_TEST_MEM:-$(cat "$S/slots/mem" 2>/dev/null || echo 2G)}; fi
 if [ -z "$AS" ]; then  # without a name: the worktree folder under the swarm folder (dev2), as dash.py's slots() names it
 	case "$PWD/" in "$S"/*) AS=${PWD#"$S"/}; AS=${AS%%/*} ;; *) AS=$(basename "$PWD") ;; esac
 fi
 ev() { "$S/ev" "$AS" test - "$@" 2>/dev/null || true; }
+# A full /tmp (a small tmpfs shared by every session of the user) stops agents from running any tool.
+# Warn the supervisor once, through a note that `board tick` shows, when it falls under 200 MB.
+tmpfree=$(df -Pm "${TMPDIR:-/tmp}" 2>/dev/null | awk 'NR == 2 {print $4}')
+if [ -n "$tmpfree" ] && [ "$tmpfree" -lt 200 ] && [ ! -e "$S/state/.tmp-low" ]; then
+	touch "$S/state/.tmp-low" 2>/dev/null && "$S/ev" "$AS" note - "TMP low: ${TMPDIR:-/tmp} has ${tmpfree} MB free" 2>/dev/null
+fi
 head=$(git rev-parse HEAD 2>/dev/null || echo none)
 [ -z "$(git status --porcelain 2>/dev/null)" ] || head="$head+dirty"
 key=

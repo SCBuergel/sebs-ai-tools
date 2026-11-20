@@ -89,6 +89,9 @@ Write one script per run, kept in the session's scratch folder, with:
 - **Copy results back as they appear,** not only at the end. Copy each file
   to `<name>.part`, then rename it, so a half-copied file is never taken for
   a result. A run that dies late then still leaves what it produced.
+- **Upload what the job reads:** for a repository, its tracked files
+  (`git ls-files -z | tar --null -T - -czf ...`), not a hand-picked list of
+  folders that misses the file a test reads.
 - **Watch through a log:** run the job on the machine detached (`nohup` or
   `tmux`), write its output to a log there, and poll that log over SSH.
   Then a dropped SSH connection does not kill the job.

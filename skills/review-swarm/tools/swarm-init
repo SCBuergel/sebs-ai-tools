@@ -3,7 +3,14 @@
 #
 #   swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S]
 #              [--until-clean K | --one-pass] [--clean-below SEV] [--max-passes P] [--regen-cmd CMD]
-#              [--py CMD] [--import-fix CMD] [--title TEXT]
+#              [--py CMD] [--import-fix CMD] [--test-mem SIZE] [--heavy-mem SIZE] [--trailer LINES] [--title TEXT]
+#
+# --test-mem and --heavy-mem set tlock's memory caps (default 2G and 8G; a gate whose own heap needs more,
+# a Gradle build for example, needs a larger --test-mem). --trailer gives the commit trailer lines the devs
+# add (newline-separated); `board brief` puts them in the dev brief.
+# When the repository has no AGENTS.md or CLAUDE.md, it writes $SWARM/GUIDE.md: the test command, the rules
+# and the severity scale, which the dev brief names to every commit-reviewer. It warns when /tmp is short
+# of space: agents that cannot write there cannot run any tool.
 #
 # --test-cmd records the repository's full test command in swarm.json (test_cmd): the merge queue
 # (`board mergeq`) fast-forwards swarm-review only after a passing run of it on the exact rebased commit.
@@ -33,7 +40,8 @@
 # Nothing is pushed. swarm-clean removes the worktrees and dev branches again.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-repo=. swarm= nrev= ndev= slots= until= tcmd= regen= py= nval= below= maxp= ifix= title="REVIEW SWARM"
+repo=. swarm= nrev= ndev= slots= until= tcmd= regen= py= nval= below= maxp= ifix= tmem= hmem= trailer= title="REVIEW SWARM"
+usage() { echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--clean-below SEV] [--max-passes P] [--regen-cmd CMD] [--py CMD] [--import-fix CMD] [--test-mem SIZE] [--heavy-mem SIZE] [--trailer LINES] [--title TEXT]"; }
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--repo) repo=$2; shift 2 ;;
@@ -51,12 +59,17 @@ while [ $# -gt 0 ]; do
 		--import-fix) ifix=$2; shift 2 ;;
 		--validators) nval=$2; shift 2 ;;
 		--title) title=$2; shift 2 ;;
-		*) echo "unknown option $1" >&2; exit 2 ;;
+		--test-mem) tmem=$2; shift 2 ;;
+		--heavy-mem) hmem=$2; shift 2 ;;
+		--trailer) trailer=$2; shift 2 ;;
+		-h|--help) usage; sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
+		*) echo "unknown option $1" >&2; usage >&2; exit 2 ;;
 	esac
 done
-[ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || {
-	echo "usage: swarm-init --repo DIR --swarm DIR --reviewers N --devs M --test-cmd CMD [--validators V] [--slots S] [--until-clean K | --one-pass] [--clean-below SEV] [--max-passes P] [--regen-cmd CMD] [--py CMD] [--import-fix CMD] [--title TEXT]" >&2; exit 2;
-}
+[ -n "$swarm" ] && [ -n "$nrev" ] && [ -n "$ndev" ] || { usage >&2; exit 2; }
+for m in "$tmem" "$hmem"; do
+	case "$m" in ''|[0-9]*[KMGT]) ;; *) echo "--test-mem and --heavy-mem take a size such as 3G" >&2; exit 2 ;; esac
+done
 [ -n "$tcmd" ] || [ -s "$swarm/swarm.json" ] || { echo "--test-cmd is required: the merge queue tests every change with it" >&2; exit 2; }
 case "$until" in ''|*[!0-9]*) [ -z "$until" ] || { echo "--until-clean takes a number" >&2; exit 2; } ;; esac
 case "$maxp" in ''|*[!0-9]*) [ -z "$maxp" ] || { echo "--max-passes takes a number" >&2; exit 2; } ;; esac
@@ -76,7 +89,12 @@ fi
 if [ -z "$slots" ] && [ -s "$swarm/slots/count" ]; then slots=$(cat "$swarm/slots/count"); fi
 [ -n "$slots" ] || slots=$(( ($(nproc) + 1) / 2 )); [ "$slots" -ge 1 ] || slots=1
 
-mkdir -p "$swarm" "$swarm/state" "$swarm/queue" "$swarm/val" "$swarm/verdicts" "$swarm/slots"
+mkdir -p "$swarm" "$swarm/state" "$swarm/queue" "$swarm/val" "$swarm/verdicts" "$swarm/slots" "$swarm/roles" "$swarm/briefs"
+for f in dev reviewer validator dash; do
+	[ -e "$swarm/roles/$f.md" ] || cp "$here/../roles/$f.md" "$swarm/roles/$f.md"
+done
+[ -z "$tmem" ] || echo "$tmem" > "$swarm/slots/mem"
+[ -z "$hmem" ] || echo "$hmem" > "$swarm/slots/heavy-mem"
 for f in ev tlock board lastmsg dash.py dash.html dashweb.py; do
 	[ -e "$swarm/$f" ] || cp "$here/$f" "$swarm/$f"
 done
@@ -86,9 +104,9 @@ touch "$swarm/events.jsonl" "$swarm/ids.txt"
 [ -e "$swarm/severity.md" ] || cp "$here/../severity.md" "$swarm/severity.md"
 [ -e "$swarm/rules.md" ] || cp "$here/../rules.md" "$swarm/rules.md"
 # swarm.json is written once; a rerun only records the options given now
-python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" "$py" "$below" "$maxp" "$ifix" <<'EOF'
+python3 - "$swarm" "$title" "$nrev" "$ndev" "$slots" "$repo" "$source" "$until" "$tcmd" "$regen" "$nval" "$py" "$below" "$maxp" "$ifix" "$trailer" <<'EOF'
 import json, os, sys
-s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval, py, below, maxp, ifix = sys.argv[1:]
+s, title, nrev, ndev, slots, repo, source, until, tcmd, regen, nval, py, below, maxp, ifix, trailer = sys.argv[1:]
 p = f"{s}/swarm.json"
 new = not os.path.exists(p)
 cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(slots), "validators": 2,
@@ -96,7 +114,7 @@ cfg = {"title": title, "reviewers": int(nrev), "devs": int(ndev), "slots": int(s
        "max_passes": 6} if new else json.load(open(p))
 for key, val in (("until_clean", until and int(until)), ("test_cmd", tcmd), ("regen_cmd", regen),
                  ("validators", nval and int(nval)), ("py", py), ("clean_below", below),
-                 ("max_passes", maxp and int(maxp)), ("import_fix_cmd", ifix)):
+                 ("max_passes", maxp and int(maxp)), ("import_fix_cmd", ifix), ("trailer", trailer)):
     if val != "":
         cfg[key] = val
 json.dump(cfg, open(p, "w"), indent=1)
@@ -125,12 +143,40 @@ interp = (f"`$SW/py` (it runs `{py}`). Use it, from your tree's root, for every 
           "scripts, one-off checks. Never hunt for another interpreter or virtualenv" if py else
           "none recorded; use what the repository guide names, and ask the supervisor once if a probe needs more")
 p = re.sub(r"(Interpreter: ).*", lambda m: m.group(1) + interp + ".", p)  # also fills {{PY}}
+# The repository's guide, or, when it has none, $SW/GUIDE.md: commit-reviewers look for AGENTS.md and judge
+# without the gate and the rules when they find nothing.
+repo = json.load(open(f"{s}/swarm.json"))["repo"]
+have = [g for g in ("AGENTS.md", "CLAUDE.md") if os.path.exists(os.path.join(repo, g))]
+if have:
+    guide = f"`{have[0]}` in your tree (the repository's own guide for AI assistants)"
+else:
+    guide = (f"`{s}/GUIDE.md`: the repository has no AGENTS.md or CLAUDE.md, so this file stands in for one. "
+             "Do not look for AGENTS.md or CLAUDE.md")
+    if not os.path.exists(f"{s}/GUIDE.md"):
+        open(f"{s}/GUIDE.md", "w").write(
+            "# Guide for this review swarm\n\nThe repository has no guide for AI assistants (AGENTS.md or CLAUDE.md);"
+            " this file, written by swarm-init, stands in for one.\n\n"
+            f"- Full test command: see \"Full test command\" in {s}/PROTOCOL.md; run it only through {s}/tlock.\n"
+            f"- Interpreter: see \"Interpreter\" in {s}/PROTOCOL.md.\n"
+            f"- What the swarm reviews for: the Task section of {s}/PROTOCOL.md.\n"
+            f"- Owner decisions and accepted tradeoffs: {s}/rules.md. Severity scale: {s}/severity.md.\n"
+            "- Priorities, in order: secure; nothing wrong (code, tests and docs match actual behaviour); "
+            "understandable; short; readable and auditable.\n"
+            "- Every behaviour change has a test that fails without it; docs describe only what exists.\n")
+p = re.sub(r"(Repository guide: ).*", lambda m: m.group(1) + guide + ".", p)  # also fills {{GUIDE}}
 open(f"{s}/PROTOCOL.md", "w").write(p)
 if py:  # a rerun with --py replaces the wrapper
     open(f"{s}/py", "w").write("#!/bin/sh\n# The project's interpreter for every agent (swarm-init --py).\n"
                                f"exec {py} \"$@\"\n")
     os.chmod(f"{s}/py", 0o755)
 EOF
+
+# Every Claude Code session of the user writes its tool output under /tmp; when that is a small tmpfs and
+# fills up, agents cannot run any tool. tlock warns again during the run.
+for d in "${TMPDIR:-/tmp}" "$swarm"; do
+	free=$(df -Pm "$d" 2>/dev/null | awk 'NR == 2 {print $4}')
+	[ -z "$free" ] || [ "$free" -ge 2048 ] || echo "warning: $d has only $free MB free; agents stop working when it fills up. Keep large scratch (packages, builds) out of it." >&2
+done
 
 if git -C "$repo" show-ref --verify --quiet refs/heads/swarm-review; then
 	echo "branch swarm-review exists; keeping it"
@@ -152,7 +198,9 @@ cat <<EOF
 swarm folder: $swarm
 repository:   $repo on swarm-review (from $source at $(git -C "$repo" rev-parse --short HEAD))
 reviewers:    $nrev$([ "$until" -gt 0 ] && echo " (each rerun until $until clean passes in a row)" || echo " (one pass each)")   devs: $ndev (worktrees $swarm/dev1..dev$ndev)   test slots: $slots
-next:         fill in the Task section of $swarm/PROTOCOL.md and $swarm/rules.md, then start the agents
+next:         fill in the Task section of $swarm/PROTOCOL.md and $swarm/rules.md, write $swarm/areas.json,
+              then start each agent from \`$swarm/board brief <name>\` (reviewers: \`board pass R<n> start\`)
+guide:        $(grep -m1 '^Repository guide:' "$swarm/PROTOCOL.md" | cut -c19- | cut -c1-120)
 board:        $swarm/board tick      $swarm/board show      merge queue: python3 $swarm/board mergeq
 dashboards:   python3 $swarm/dash.py      python3 $swarm/dashweb.py
 allow rules:  for agents to run without permission prompts, the user may add (this script changes no settings):

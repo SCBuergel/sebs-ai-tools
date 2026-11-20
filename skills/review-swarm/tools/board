@@ -26,7 +26,11 @@ dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, 
   board release AGENT ID             give a claim back
   board beat AGENT                   keep AGENT's claims alive while it waits on something the log does not show
   board flag NAME on|off             supervisor: wind-down (devs take no new findings) or paused
-  board pass AREA start|stop         supervisor: start the area's next review pass (prints its tree), or stop it
+  board pass AREA start|stop         supervisor: start the area's next review pass (prints its tree and
+                                     writes its brief), or stop it
+  board brief NAME                   supervisor: write NAME's filled brief (R3, V4, dev2, dash) to briefs/,
+                                     print its path; start the agent with "Read <path> and follow it"
+  board gate-ok                      supervisor: the GATE lines are handled (the test command was extended)
   board tick                         supervisor: release dead claims, close passes, print what to do
   board watch                        supervisor: wait until tick has something new to do, print it, exit
   board show [ID]                    the board, or one finding's history
@@ -36,7 +40,7 @@ dashboards are a view of the board. Usage (AGENT is the caller's name, e.g. R3, 
 A claim is a lease: it stays the owner's while the owner, or the owner's commit-reviewer, logged an event
 or a test run, or ran `board` in the last LEASE seconds. A dead claim goes back on the board for others.
 """
-import fcntl, glob, json, os, re, shlex, subprocess, sys, time
+import fcntl, fnmatch, glob, json, os, re, shlex, subprocess, sys, time
 
 S = os.path.dirname(os.path.abspath(__file__))
 B = os.path.join(S, "state")
@@ -181,6 +185,15 @@ def area_of(fid):
     return fid.split("-")[0]
 
 
+def files_of(f):
+    """The files a card touches: the finding's file, plus those its submitted change edits."""
+    out = {text(f["id"]).get("file")} - {None, ""}
+    if f.get("sha"):
+        base = git("merge-base", f["sha"], "swarm-review")
+        out |= set(git("diff", "--name-only", base, f["sha"]).split()) if base else set()
+    return out
+
+
 def pick(agent, role, fs, evs):
     now = time.time()
     if flags().get("paused"):
@@ -208,13 +221,19 @@ def pick(agent, role, fs, evs):
             return back[0], "dev", agent, "revise"
         if flags().get("wind-down"):
             return None
-        mine_last = [f for f in fs.values() if f.get("dev") == agent and f["state"] in ("queued", "rev", "agreed")]
+        mine_last = [f for f in fs.values() if f.get("dev") == agent and f["state"] in ("rev", "agreed")]
         mine_last.sort(key=lambda f: f.get("since", 0))
         near = text(mine_last[-1]["id"]).get("file") if mine_last else None
-        held = {text(f["id"]).get("file") for f in fs.values() if f["state"] in ("dev", "revise") and f.get("dev") != agent}
+        # Files a change not merged yet touches, the dev's own queued ones included: a new card on one of
+        # them is branched from a swarm-review without that change, so it conflicts at the rebase and
+        # costs a revise and another review round. Such a card waits behind the others of its severity.
+        held = set()
+        for f in fs.values():
+            if f["state"] in ("dev", "revise", "queued"):
+                held |= files_of(f)
         todo = [f for f in fs.values() if f["state"] == "valid"]
         todo.sort(key=lambda f: (RANK.get(f.get("severity"), 9),
-                                 text(f["id"]).get("file") in held,
+                                 bool(files_of(f) & held),
                                  not near or text(f["id"]).get("file") != near,
                                  f.get("since", 0)))
         return (todo[0], "dev", agent, "implement") if todo else None
@@ -265,14 +284,22 @@ def cmd_next(agent, role, wait):
     fs = findings()
     if role == "verify":
         n = sum(1 for f in fs.values() if area_of(f["id"]) == agent and f["state"] in OPEN)
-        print(f"NONE open={n}" + (" (keep waiting: your area still has open findings)" if n else " (nothing left to verify)"))
+        print(f"NONE open={n}" + (f" (keep waiting: your area still has open findings) {FOREGROUND}" if n
+                                  else " (nothing left to verify)"))
     elif role == "validator" and verdicts(agent, fs) >= RETIRE:
         print(f"NONE retire (you judged {RETIRE} findings; log `ev {agent} stopped - \"retired\"` and end)")
     else:
         st = stage()
         end_now = st in ("done", "stopped") or (role == "dev" and flags().get("wind-down")
                                                 and not any(f["state"] in ("revise",) for f in fs.values()))
-        print("NONE stop (the swarm is finishing; end your turn)" if end_now else "NONE (nothing to claim yet; run next again)")
+        print("NONE stop (the swarm is finishing; end your turn)" if end_now
+              else f"NONE (nothing to claim yet) {FOREGROUND}")
+
+
+# Waiting agents that background a wait end their turn, and each end wakes the supervisor (one run had 359
+# such wake-ups); in the foreground the wait costs nothing.
+FOREGROUND = ("Run it again in the foreground (Bash tool timeout 600000), never with run_in_background and "
+              "never with sleep: a background wait ends your turn and wakes the supervisor for nothing.")
 
 
 def stage():
@@ -391,7 +418,7 @@ def cmd_await(agent, fid, wait):
                     print(open(p).read())
                 return
         if time.time() >= end:
-            print("NONE (no verdict yet; run await again)")
+            print(f"NONE (no verdict yet) {FOREGROUND}")
             return
         time.sleep(5)
 
@@ -515,6 +542,45 @@ def cmd_pass(area, what):
         log("board", "pass", "", f"{area} {n} started")
     beat(area)
     print(f"{area} pass {n}: TREE={tree} FIRST_N={first_free(area)}")
+    ap = os.path.join(S, "areas.json")
+    if os.path.exists(os.path.join(S, "roles", "reviewer.md")) and area in (json.load(open(ap)) if os.path.exists(ap) else {}):
+        print(f"BRIEF={cmd_brief(area, quiet=True)}")
+    else:
+        print(f"no brief written: {ap} has no area sentence for {area}; add it, then run `board brief {area}`",
+              file=sys.stderr)
+
+
+def cmd_brief(name, quiet=False):
+    """Fill the role brief for NAME from swarm.json, areas.json and the running pass; write it, print its path."""
+    c = cfg()
+    m = re.fullmatch(r"(R|V|dev)(\d+)|dash", name)
+    if not m:
+        die(f"no brief for {name}: use R<n>, V<n>, dev<n> or dash")
+    role = {"R": "reviewer", "V": "validator", "dev": "dev", None: "dash"}[m.group(1)]
+    tpl = os.path.join(S, "roles", role + ".md")
+    if not os.path.exists(tpl):
+        die(f"{tpl} is missing; run swarm-init again, which copies the role briefs")
+    val = {"SW": S, "REPO": c["repo"], "SOURCE": c["source_branch"], "N_DEV": str(c["devs"]),
+           "NAME": name, "N": m.group(2) or "",
+           "TRAILER": " and end with these lines:\n" + c["trailer"] if c.get("trailer") else ""}
+    out = os.path.join(S, "briefs", name + ".md")
+    if role == "reviewer":
+        areas = json.load(open(os.path.join(S, "areas.json"))) if os.path.exists(os.path.join(S, "areas.json")) else {}
+        if name not in areas:
+            die(f"{S}/areas.json has no area sentence for {name}; write it first")
+        n = current_pass(name)
+        val.update(AREA=areas[name], FIRST_N=str(first_free(name)),
+                   TREE=os.path.join(S, "base") if n == 1 else os.path.join(S, f"base-{name}-p{n}"))
+        out = os.path.join(S, "briefs", f"{name}-p{n}.md")
+    body = re.sub(r"\{\{(\w+)\}\}", lambda k: val.get(k.group(1), k.group(0)), open(tpl).read())
+    left = sorted(set(re.findall(r"\{\{\w+\}\}", body)))
+    if left:
+        die(f"{tpl} has placeholders the board cannot fill: {' '.join(left)}")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "w").write(body)
+    if not quiet:
+        print(out)
+    return out
 
 
 def tick():
@@ -599,6 +665,12 @@ def tick():
     for d in devs:
         if work and (stopped(d, evs) or (any(e["agent"] == d for e in evs) and now - last_sign(d, evs) > LEASE)):
             out.append(f"QUIET {d}: no sign of life for {LEASE // 60} min with work waiting; check it, resume or replace it")
+    low = [e["msg"] for e in evs if e["kind"] == "note" and e["msg"].startswith("TMP low")]
+    if low and os.path.exists(os.path.join(B, ".tmp-low")):  # tlock's warning, until the supervisor removes the mark
+        out.append(f"{low[-1]}; free space there (move large scratch under {S}), then rm {B}/.tmp-low")
+    for g in gate_lines(evs):
+        out.append(g + "; extend the test command (swarm.json test_cmd, rerun swarm-init --test-cmd), then "
+                   "`board gate-ok`, or `board gate-ok` if it does run")
     unres = [f["id"] for f in fs.values() if f["state"] == "unresolved"]
     if unres:
         out.append(f"USER unresolved (tell the user once each; board show <id>): {' '.join(unres)}")
@@ -618,7 +690,7 @@ def cmd_tick():
     print("\n".join(tick()))
 
 
-ACT = ("START", "QUIET", "USER", "FINISHED")
+ACT = ("START", "QUIET", "USER", "GATE", "TMP", "FINISHED")
 
 
 def cmd_watch():
@@ -897,6 +969,9 @@ def merge_one(f, c):
         return f"the tests failed (rc={rc}) on the rebased change {head[:9]}, and again on a rerun; output in {logf}"
     if git("rev-parse", "swarm-review", cwd=wt) != old:
         return "retry"
+    for t in unseen_tests(wt, old, head, c["test_cmd"], logf):
+        log("merge-queue", "note", fid, f"GATE {fid} adds {t}, which the test command may not run: "
+            "neither its output nor the command (or a script it names) mentions or globs it")
     ff = subprocess.run(["git", "-C", c["repo"], "merge", "-q", "--ff-only", head], capture_output=True, text=True)
     if ff.returncode:
         log("merge-queue", "status", fid, "fast-forward of swarm-review failed: " + ff.stderr.strip())
@@ -906,6 +981,36 @@ def merge_one(f, c):
     f["sha"] = head
     log("merge-queue", "merged", fid, head)
     return None
+
+
+def unseen_tests(wt, old, head, cmd, logf):
+    """Test files the change adds that the gate shows no sign of running: not named in its output, and not
+    named or matched by a glob in the command or in a file the command names. A fixed list of tests in the
+    command would otherwise never run the tests the swarm adds."""
+    added = [p for p in git("diff", "--name-only", "--diff-filter=A", old, head, cwd=wt).split() if TEST_PATH_RE.search(p)]
+    if not added:
+        return []
+    seen = open(logf, errors="replace").read() + "\n" + cmd
+    for tok in shlex.split(cmd, posix=True) if cmd else []:
+        p = os.path.join(wt, tok)
+        if os.path.isfile(p) and os.path.getsize(p) < 200_000:
+            seen += "\n" + open(p, errors="replace").read()
+    globs = re.findall(r"[\w./{}\[\]-]*\*[\w./*{}\[\]-]*", seen)
+    def ran(path):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        return (path in seen or os.path.basename(path) in seen or re.search(rf"\b{re.escape(stem)}\b", seen)
+                or any(fnmatch.fnmatch(path, g) or fnmatch.fnmatch(path, "*/" + g.lstrip("./")) for g in globs))
+    return [p for p in added if not ran(p)]
+
+
+def cmd_gate_ok():
+    log("board", "note", "", "gate-ok: the GATE lines so far are handled")
+
+
+def gate_lines(evs):
+    """GATE notes logged since the supervisor's last `board gate-ok`."""
+    last = max((i for i, e in enumerate(evs) if e["kind"] == "note" and e["msg"].startswith("gate-ok")), default=-1)
+    return [e["msg"] for e in evs[last + 1:] if e["kind"] == "note" and e["msg"].startswith("GATE ")]
 
 
 def mergeq_running():
@@ -931,6 +1036,7 @@ def cmd_mergeq():
     log("merge-queue", "status", "", "merge queue running")
     while True:
         beat("merge-queue")
+        c = cfg()  # reread: the supervisor may extend the test command while the queue runs
         q = sorted((f for f in findings().values() if f["state"] == "queued"), key=lambda f: f.get("queued_at", 0))
         if not q:
             time.sleep(10)
@@ -976,6 +1082,8 @@ def main(a):
             "beat": (1, lambda: beat(r[0])),
             "flag": (2, lambda: cmd_flag(*r[:2])),
             "pass": (2, lambda: cmd_pass(*r[:2])),
+            "brief": (1, lambda: cmd_brief(r[0])),
+            "gate-ok": (0, cmd_gate_ok),
             "tick": (0, cmd_tick),
             "watch": (0, cmd_watch),
             "show": (0, lambda: cmd_show(r[0] if r else None)),

@@ -391,3 +391,92 @@ def test_the_merge_queue_never_reuses_a_cached_pass(tmp_path, monkeypatch):
 ])
 def test_additions_refuse_names_defined_on_both_sides(ours, theirs, ok):
     assert load_board_module().additions_block("tests/test_m.py", ours + "\n", "", theirs + "\n") is ok
+
+
+def test_brief_fills_every_placeholder_and_pass_start_writes_the_reviewers(tmp_path):
+    _, sw = init_swarm(tmp_path, "true", "--until-clean", "2", "--trailer", "Co-Authored-By: X <x@example.com>")
+    board = load_board(sw)
+    for name in ("V1", "dev1", "dash"):
+        body = open(subprocess.run([str(sw / "board"), "brief", name], capture_output=True, text=True,
+                                   check=True).stdout.strip()).read()
+        assert "{{" not in body and str(sw) in body
+    assert "end with these lines:\nCo-Authored-By: X" in (sw / "briefs" / "dev1.md").read_text()
+    assert "one of 1 devs" in (sw / "briefs" / "dev1.md").read_text()
+    r = subprocess.run([str(sw / "board"), "pass", "R1", "start"], capture_output=True, text=True)
+    assert r.returncode == 0 and "BRIEF=" not in r.stdout and "areas.json" in r.stderr  # no area sentence yet
+    (sw / "areas.json").write_text(json.dumps({"R1": "the m module: is X right?"}))
+    out = subprocess.run([str(sw / "board"), "brief", "R1"], capture_output=True, text=True, check=True).stdout
+    body = open(out.strip()).read()
+    assert out.strip().endswith("R1-p1.md") and "the m module: is X right?" in body and "R1-1.json" not in body
+    assert f"{sw}/base" in body and "{{" not in body
+
+
+def test_pass_start_prints_the_brief_of_the_new_pass(tmp_path):
+    _, sw = init_swarm(tmp_path, "true", "--until-clean", "2")
+    (sw / "areas.json").write_text(json.dumps({"R1": "area one"}))
+    out = subprocess.run([str(sw / "board"), "pass", "R1", "start"], capture_output=True, text=True, check=True).stdout
+    brief = out.split("BRIEF=")[1].strip()
+    assert brief.endswith("R1-p1.md") and "area one" in open(brief).read()
+
+
+def test_a_card_on_a_file_a_queued_change_touches_waits(tmp_path):
+    _, sw = init_swarm(tmp_path, "true")
+    board = load_board(sw)
+    sha = dev_commit(sw, "X = 2\n")  # edits src/m.py
+    for fid, file, state, extra in (("R1-1", "src/a.py", "queued", {"sha": sha, "dev": "dev2"}),
+                                    ("R1-2", "src/other.py", "valid", {}), ("R1-3", "src/b.py", "valid", {})):
+        (sw / "queue" / f"{fid}.json").write_text(json.dumps({"id": fid, "file": file, "title": fid}))
+        (sw / "state" / f"{fid}.json").write_text(json.dumps({"id": fid, "area": "R1", "state": state,
+                                                              "severity": "Low", "since": 1, **extra}))
+    # R1-2 names src/other.py but is older; R1-3 is on src/b.py. Make R1-2 touch the queued change's file.
+    (sw / "queue" / "R1-2.json").write_text(json.dumps({"id": "R1-2", "file": "src/m.py", "title": "R1-2"}))
+    got = board.pick("dev1", "dev", board.findings(), board.events())
+    assert got[0]["id"] == "R1-3"
+
+
+def test_the_merge_queue_flags_a_new_test_the_gate_does_not_run(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    _, sw = init_swarm(tmp_path, "echo ran tests/test_old.py")
+    (sw / "dev1" / "tests").mkdir()
+    (sw / "dev1" / "tests" / "test_new.py").write_text("def test_x():\n    pass\n")
+    git("add", ".", cwd=sw / "dev1")
+    git("commit", "-qm", "[R1-1] add a test", cwd=sw / "dev1")
+    board = load_board(sw)
+    assert board.merge_one({"id": "R1-1", "sha": git("rev-parse", "HEAD", cwd=sw / "dev1")}, board.cfg()) is None
+    lines = [l for l in board.tick() if l.startswith("GATE")]
+    assert len(lines) == 1 and "tests/test_new.py" in lines[0]
+    board.cmd_gate_ok()
+    assert not [l for l in board.tick() if l.startswith("GATE")]
+
+
+@pytest.mark.parametrize("cmd", ["echo tests/test_new.py ok", "for t in tests/test_*.py; do :; done",
+                                 "python3 -m pytest -q tests/test_new.py"])
+def test_a_new_test_the_gate_names_or_globs_is_not_flagged(tmp_path, cmd):
+    wt = tmp_path / "wt"
+    (wt / "tests").mkdir(parents=True)
+    git("init", "-q", "-b", "main", cwd=wt)
+    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "a", cwd=wt)
+    old = git("rev-parse", "HEAD", cwd=wt)
+    (wt / "tests" / "test_new.py").write_text("def test_x():\n    pass\n")
+    git("add", ".", cwd=wt)
+    git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "b", cwd=wt)
+    logf = tmp_path / "log"
+    logf.write_text("1 passed\n")
+    board = load_board_module()
+    assert board.unseen_tests(str(wt), old, git("rev-parse", "HEAD", cwd=wt), cmd, str(logf)) == []
+    assert board.unseen_tests(str(wt), old, git("rev-parse", "HEAD", cwd=wt), "true", str(logf)) == ["tests/test_new.py"]
+
+
+def test_a_repository_without_a_guide_gets_one_in_the_swarm_folder(tmp_path):
+    repo, sw = init_swarm(tmp_path, "true", "--test-mem", "3G")
+    assert (sw / "GUIDE.md").exists() and f"Repository guide: `{sw}/GUIDE.md`" in (sw / "PROTOCOL.md").read_text()
+    assert (sw / "slots" / "mem").read_text().strip() == "3G"
+    assert "{{" not in (sw / "PROTOCOL.md").read_text()
+    r = subprocess.run([os.path.join(TOOLS, "swarm-init"), "--help"], capture_output=True, text=True)
+    assert r.returncode == 0 and "--test-mem" in r.stdout and "set -euo" not in r.stdout
+
+
+def test_a_waiting_agent_is_told_to_wait_in_the_foreground(tmp_path):
+    _, sw = init_swarm(tmp_path, "true")
+    out = subprocess.run([str(sw / "board"), "next", "dev1", "dev", "--wait", "0"], capture_output=True, text=True).stdout
+    assert out.startswith("NONE") and "foreground" in out and "600000" in out

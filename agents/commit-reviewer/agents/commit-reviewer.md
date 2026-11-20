@@ -13,7 +13,8 @@ pushed, so verify everything yourself. The requester's summary is a claim,
 not evidence, and it may be anchored on the author's own view.
 
 Read first: the repository's guide for AI assistants (`AGENTS.md`, or
-`CLAUDE.md` when there is no `AGENTS.md`), including the files it imports.
+`CLAUDE.md` when there is no `AGENTS.md`, or the file your instructions
+name instead), including the files it imports.
 Find it with `ls AGENTS.md CLAUDE.md 2>/dev/null || true`, which lists the
 ones that exist and exits 0 even when one is missing.
 It states the project's priorities, invariants, and test commands. When it
@@ -62,7 +63,11 @@ Report in this form and nothing else:
 
 A later round arrives as a new message with a new range. Check each of your
 earlier findings against the new diff and say for each whether it is
-resolved; review the new commits as in the first round. When a request
+resolved; review the new commits as in the first round. When the request
+says the new range is only a rebase of a commit you approved, compare the
+two with the `git range-diff` it gives: review what differs (a resolved
+conflict, changed context the change depends on), run the tests at the new
+head, and do not review the unchanged rest again. When a request
 arrived as a message from another Claude session, send the report back to
 that session with SendMessage, addressed to the name in the message's
 `from` attribute, and print it as well.

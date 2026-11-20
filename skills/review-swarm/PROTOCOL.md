@@ -2,6 +2,7 @@
 
 SW={{SW}}
 Repository: {{REPO}}, reviewed from branch {{SOURCE}}.
+Repository guide: {{GUIDE}}
 
 ## Task
 
@@ -18,7 +19,9 @@ Nobody relays messages. Every finding is a card on the board, `$SW/board`, movin
 with the exits invalid, duplicate and unresolved, and revise: back with the dev that fixed it. Each
 agent pulls work whose state matches its role with `$SW/board next <name> <role> --wait 540`, which
 prints `WORK ...` with the files to read, or `NONE ...` after waiting; on NONE, run it again unless it
-says `stop` or `retire`. The agent writes its result back with the board command its brief names. Every
+says `stop` or `retire`. Run `board next`, `board await` and `tlock` in the foreground, with the Bash
+tool's timeout set to 600000, never with run_in_background and never with `sleep`: a backgrounded wait
+ends your turn, and every turn you end wakes the supervisor for nothing. The agent writes its result back with the board command its brief names. Every
 change is logged to `$SW/events.jsonl`, which the dashboards show. `$SW/board show [<id>]` prints the
 board or one card's history.
 
@@ -78,6 +81,10 @@ $SW/val/<id>.txt. A later change to its requirements is appended there as an AME
 (`board amend`), which overrides what it contradicts above; a verifier judges the fix against the
 amended requirements. A design finding that replaces several (root-cause escalation) is named
 `<area>-D<n>`, e.g. R4-D1.
+
+## Sources outside the repository
+Cite a commit or file of another repository as `<repo>@<sha>:<path>`, never as a bare sha: `git show
+<sha>` in this repository fails for it. Where such sources are checked out is listed in the Task section.
 
 ## Severity
 Use the scale in $SW/severity.md (Critical/High/Medium/Low/Info). Cosmetic issues (wording,

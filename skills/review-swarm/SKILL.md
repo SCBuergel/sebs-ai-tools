@@ -65,7 +65,14 @@ tear down.
   `commit-reviewer:commit-reviewer`). If not, stop and tell the user.
 - The repository has a guide for AI assistants (`AGENTS.md` or `CLAUDE.md`)
   that names its test commands; the devs and their reviewers follow it. If it
-  has none, ask the user for the test command and the rules to judge by.
+  has none, ask the user for the test command and the rules to judge by;
+  `swarm-init` then writes `$SW/GUIDE.md`, which stands in for the guide and
+  which `PROTOCOL.md` names, so no commit-reviewer judges without one.
+- `/tmp` has room: every session of the user writes its tool output there,
+  and an agent that cannot write there cannot run any tool. `swarm-init`
+  warns under 2 GB free. Keep your own large scratch (packages, builds,
+  downloads) under `$SW` or another disk-backed folder, never in the
+  session scratchpad.
 - The checkout is clean and on the branch the review starts from.
 - `python3`, `flock` and `git worktree` are available; `systemd-run` is
   optional (without it tests run uncapped).
@@ -91,6 +98,9 @@ or 3 validators, devs = CPUs - 1 (at least 2, at most 8), test slots = CPUs / 2
 rounded up (what `swarm-init` picks when `--slots` is left out). Each test run
 is capped at `SWARM_TEST_MEM` (2G), so pass a lower `--slots` when slots × 2 GB
 plus 4 GB does not fit the machine's memory. Check with `nproc` and `free -h`.
+A test command whose own heap needs more (a Gradle or JVM build, for
+example) needs a larger cap: run it once yourself, look at its peak memory
+(`/usr/bin/time -v`), and pass `--test-mem` to `swarm-init`.
 
 The slot count can be changed while the swarm runs: `echo 4 > $SW/slots/count`
 applies to every test run that is waiting for a slot or starts afterwards.
@@ -109,6 +119,14 @@ suite itself (`--fresh`).
 Split the task into areas by trust boundary or subsystem, so that two
 reviewers do not read the same files for the same question. Name each area
 with one sentence saying what it covers and what question to ask of it.
+One question per area: when the sentence joins unrelated subjects with
+"and" (a UI, the build scripts and the README), split it, or the area never
+comes out clean and runs to the pass cap. Keep "the docs match the code"
+apart from "it fails safely". A question about every exit path of a
+lifecycle (a cloud machine always deleted, a lock always released) does
+not converge by reading either: each fresh reviewer finds the next path.
+Ask the user for a fault-injection test of it (a fake provider API that
+fails at each step) instead of more passes.
 
 ## 3. Set up
 
@@ -120,11 +138,22 @@ repository:
 <skill base directory>/tools/swarm-init --repo . --swarm $SW \
     --reviewers N --devs M --validators V --slots S \
     --test-cmd "<full test command>" [--regen-cmd "<command>"] \
-    [--py "<interpreter command>"] --title "<repo> review swarm"
+    [--py "<interpreter command>"] [--test-mem 3G] \
+    [--trailer "<commit trailer lines>"] --title "<repo> review swarm"
 ```
 
 `--test-cmd` is required: the merge queue runs exactly this command on every
-change before it reaches `swarm-review`. If the repository keeps derived
+change before it reaches `swarm-review`. It must find the tests by itself
+(a test runner's discovery, or a glob such as `scripts/**/test_*.py`),
+never through a fixed list: the devs add test files, and a list would never
+run them. It should also say what ran, a count per suite and a total, so a
+reviewer can tell that a quiet run tested something. When a change adds a
+test file the gate shows no sign of running, the merge queue logs a note
+and `board tick` prints a `GATE` line: extend the command (`swarm-init
+--test-cmd` again, which the running queue picks up), then run `board
+gate-ok`. A part of the repository the gate does not build or test at all
+(a second language, a native library) is listed in the final report as not
+verified by the swarm. If the repository keeps derived
 totals in its docs, such as test counts, pass the command that regenerates
 them as `--regen-cmd`: devs then never edit those totals, which removes most
 rebase conflicts, and you run it once before the final review.
@@ -156,8 +185,14 @@ reviewers read, `$SW/merge` for the merge queue, and one worktree per dev on
 `swarm-dev1`, `swarm-dev2`, and so on. Run it a second time and it completes
 what is missing and keeps what exists.
 
+`--trailer` takes the commit trailer lines this session is told to add,
+one per line; the dev briefs ask for them. `swarm-init --help` prints all
+options.
+
 Then fill in the Task section of `$SW/PROTOCOL.md` (what the swarm reviews
-for, and what a reviewer needs to know to judge a finding) and the Accepted
+for, and what a reviewer needs to know to judge a finding, including the
+other repositories the code depends on, such as a pinned upstream, and
+where each is checked out: agents cite them as `<repo>@<sha>:<path>`) and the Accepted
 tradeoffs in `$SW/rules.md` (documented owner decisions; "none recorded"
 otherwise). Adapt `$SW/severity.md` to the project's trust boundaries if the
 default scale does not fit.
@@ -184,20 +219,19 @@ command to start it themselves, and go on: the swarm does not need it.
 Start the merge queue with the Bash tool in the background: `python3
 $SW/board mergeq`. It runs until stopped.
 
-Fill each brief from `roles/` by replacing its `{{...}}` placeholders
-(`{{SW}}`, `{{REPO}}`, `{{SOURCE}}`, `{{N}}`, `{{N_DEV}}`, `{{NAME}}`: a
-validator's name, `{{AREA}}`, `{{TREE}}` and `{{FIRST_N}}`: the reviewer's
-tree and first finding number, which `board pass` prints, `{{TRAILER}}`: the
-commit trailer lines this session is told to add, as " and end with these
-lines:" plus the lines, or nothing) and start each agent with the Agent tool,
-`subagent_type` general-purpose, in the background. Before the first
-reviewer, write each reviewer's area sentence to `$SW/areas.json` as
-`{"R1": "<area>", "R2": "<area>", ...}`; the web dashboard shows it. Record
+Before the first reviewer, write each reviewer's area sentence to
+`$SW/areas.json` as `{"R1": "<area>", "R2": "<area>", ...}`; the briefs and
+the web dashboard use it. `$SW/board brief <name>` (V1, dev2, dash) fills
+the role's brief from `$SW/roles/` with the swarm's values, writes it to
+`$SW/briefs/<name>.md` and prints the path; `board pass R<n> start` does
+the same for a reviewer's pass and prints it as `BRIEF=`. Start each agent
+with the Agent tool, `subagent_type` general-purpose, in the background,
+with the prompt "Read <path> and follow it." Record
 every agent's id in `$SW/ids.txt` as `<name> <id>`; a later session needs
 them.
 
-1. Reviewers: for each area run `$SW/board pass R<n> start`, which prints the
-   pass's `TREE` and `FIRST_N`, then start the reviewer with them. Log
+1. Reviewers: for each area run `$SW/board pass R<n> start` and start the
+   reviewer from the `BRIEF` it prints. Log
    `$SW/ev supervisor stage - "reviewing <N> areas"`.
 2. Validators V1..V<v> (`swarm.json` validators).
 3. Devs dev1..dev<m>, all at once: one with nothing to claim waits on the
@@ -212,20 +246,23 @@ Run `$SW/board watch` with the Bash tool in the background. It exits as soon
 as the board has something new for you, and prints `$SW/board tick`'s view:
 counts per state, and lines to act on. Act on each, then start `board watch`
 again. When a subagent's completion notification arrives, run `$SW/board
-tick` yourself.
+tick` yourself. A notification that an agent "is waiting on its own
+background work" needs no tick and no reply: answer it with nothing. Many
+of them mean the agents background their waits against the briefs; say so
+to the user once.
 
 - `START reviewer R3 pass p`: the area's previous pass is closed and not yet
   clean enough. Run `$SW/board pass R3 start` and start a fresh agent named R3
-  with the same brief and the printed `TREE` and `FIRST_N`, and nothing else
-  changed: it starts with no memory of earlier passes, so what earlier
-  reviewers learned does not steer it. Record it in `ids.txt` as `R3-p<p>
+  from the `BRIEF` it prints, and nothing else changed: it starts with no
+  memory of earlier passes, so what earlier reviewers learned does not steer it. Record it in `ids.txt` as `R3-p<p>
   <id>`. The board itself logs when a pass is clean, not clean or finished.
 - `QUIET reviewer R3`: the area's reviewer stopped without logging `done`
   in the running pass. A pass closes only on its own reviewer's `done`, so
   a `stopped` from an earlier pass's agent, or from one that died, never
   closes it as clean. If the running pass's agent is alive, ignore the
-  line; if not, start a fresh R3 with the pass's `TREE`, or `$SW/board pass
-  R3 stop`.
+  line; if not, start a fresh R3 from the brief `$SW/board brief R3` prints
+  (the running pass's tree, numbered after the findings already reported),
+  or run `$SW/board pass R3 stop`.
 - `START validator V<k>`: findings wait and fewer validators than configured
   are alive. Start one with that name.
 - `START merge queue`: changes wait and no merge queue is running. Start it
@@ -234,6 +271,11 @@ tick` yourself.
   `$SW/lastmsg <agent id>`; resume it with SendMessage, or log `$SW/ev devN
   stopped - "<why>"` and start a replacement with the same brief. Its claims
   already went back on the board.
+- `GATE <id> adds <test> ...`: the merged change added a test the test
+  command may not run. Extend the command, or check that it does run, then
+  `$SW/board gate-ok`.
+- `TMP low: ...`: `/tmp` is nearly full. Free it (your own scratch first),
+  then remove the mark the line names.
 - `USER unresolved ...`: tell the user about each such finding once, with
   `$SW/board show <id>`.
 - `FINISHED`: go to section 6.
