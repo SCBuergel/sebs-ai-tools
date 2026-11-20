@@ -400,7 +400,8 @@ def test_brief_fills_every_placeholder_and_pass_start_writes_the_reviewers(tmp_p
         body = open(subprocess.run([str(sw / "board"), "brief", name], capture_output=True, text=True,
                                    check=True).stdout.strip()).read()
         assert "{{" not in body and str(sw) in body
-    assert "end with these lines:\nCo-Authored-By: X" in (sw / "briefs" / "dev1.md").read_text()
+    assert 'start with "[<id>] ". End each with these lines, exactly:\n\nCo-Authored-By: X <x@example.com>\n\n Write' \
+        in (sw / "briefs" / "dev1.md").read_text()
     assert "one of 1 devs" in (sw / "briefs" / "dev1.md").read_text()
     r = subprocess.run([str(sw / "board"), "pass", "R1", "start"], capture_output=True, text=True)
     assert r.returncode == 0 and "BRIEF=" not in r.stdout and "areas.json" in r.stderr  # no area sentence yet
@@ -449,22 +450,47 @@ def test_the_merge_queue_flags_a_new_test_the_gate_does_not_run(tmp_path, monkey
     assert not [l for l in board.tick() if l.startswith("GATE")]
 
 
-@pytest.mark.parametrize("cmd", ["echo tests/test_new.py ok", "for t in tests/test_*.py; do :; done",
-                                 "python3 -m pytest -q tests/test_new.py"])
-def test_a_new_test_the_gate_names_or_globs_is_not_flagged(tmp_path, cmd):
+def gate_repo(tmp_path, files):
     wt = tmp_path / "wt"
-    (wt / "tests").mkdir(parents=True)
+    wt.mkdir()
     git("init", "-q", "-b", "main", cwd=wt)
     git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "a", cwd=wt)
     old = git("rev-parse", "HEAD", cwd=wt)
-    (wt / "tests" / "test_new.py").write_text("def test_x():\n    pass\n")
+    for name, body in files.items():
+        (wt / name).parent.mkdir(parents=True, exist_ok=True)
+        (wt / name).write_text(body)
     git("add", ".", cwd=wt)
     git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "b", cwd=wt)
+    return wt, old, git("rev-parse", "HEAD", cwd=wt)
+
+
+@pytest.mark.parametrize("cmd,log,unseen", [
+    ("echo tests/test_new.py ok", "", []),                         # named
+    ("for t in tests/test_*.py; do :; done", "", []),              # globbed
+    ("python3 -m pytest -q tests/test_new.py", "", []),
+    ("python3 -m pytest -q x/tests", "....  [100%]\n5 passed", []),  # a folder holding it
+    ("python3 -m pytest -q", "5 passed", []),                      # discovery
+    ("python3 -m pytest -q tests/test_old.py", "", ["x/tests/test_new.py"]),       # a fixed list
+    ("python3 -m pytest -q tests/test_old.py", "/* note */ *", ["x/tests/test_new.py"]),  # a stray * is no glob
+    ("cargo test && python3 -c 'import ast'", "", ["x/tests/test_new.py"]),       # no runner for .py
+    ("true # don't", "", ["x/tests/test_new.py"]),                 # does not split with shlex
+])
+def test_a_new_test_the_gate_does_not_run_is_found(tmp_path, cmd, log, unseen):
+    wt, old, head = gate_repo(tmp_path, {"x/tests/test_new.py": "def test_x():\n    pass\n",
+                                         "x/tests/conftest.py": "", "x/tests/data.json": "{}"})
     logf = tmp_path / "log"
-    logf.write_text("1 passed\n")
+    logf.write_text(log)
+    assert load_board_module().unseen_tests(str(wt), old, head, cmd, str(logf)) == unseen
+
+
+def test_a_script_the_gate_names_counts_as_the_command(tmp_path):
+    wt, old, head = gate_repo(tmp_path, {"check.sh": "for t in scripts/test_*.py; do python3 $t; done\n",
+                                         "scripts/test_new.py": ""})
+    logf = tmp_path / "log"
+    logf.write_text("")
     board = load_board_module()
-    assert board.unseen_tests(str(wt), old, git("rev-parse", "HEAD", cwd=wt), cmd, str(logf)) == []
-    assert board.unseen_tests(str(wt), old, git("rev-parse", "HEAD", cwd=wt), "true", str(logf)) == ["tests/test_new.py"]
+    assert board.unseen_tests(str(wt), old, head, "bash check.sh", str(logf)) == []
+    assert board.unseen_tests(str(wt), old, head, "bash other.sh", str(logf)) == ["scripts/test_new.py"]
 
 
 def test_a_repository_without_a_guide_gets_one_in_the_swarm_folder(tmp_path):

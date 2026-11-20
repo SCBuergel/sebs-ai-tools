@@ -543,7 +543,9 @@ def cmd_pass(area, what):
     beat(area)
     print(f"{area} pass {n}: TREE={tree} FIRST_N={first_free(area)}")
     ap = os.path.join(S, "areas.json")
-    if os.path.exists(os.path.join(S, "roles", "reviewer.md")) and area in (json.load(open(ap)) if os.path.exists(ap) else {}):
+    if not os.path.exists(os.path.join(S, "roles", "reviewer.md")):
+        print(f"no brief written: {S}/roles/ is missing; run swarm-init again", file=sys.stderr)
+    elif area in (json.load(open(ap)) if os.path.exists(ap) else {}):
         print(f"BRIEF={cmd_brief(area, quiet=True)}")
     else:
         print(f"no brief written: {ap} has no area sentence for {area}; add it, then run `board brief {area}`",
@@ -562,7 +564,7 @@ def cmd_brief(name, quiet=False):
         die(f"{tpl} is missing; run swarm-init again, which copies the role briefs")
     val = {"SW": S, "REPO": c["repo"], "SOURCE": c["source_branch"], "N_DEV": str(c["devs"]),
            "NAME": name, "N": m.group(2) or "",
-           "TRAILER": " and end with these lines:\n" + c["trailer"] if c.get("trailer") else ""}
+           "TRAILER": " End each with these lines, exactly:\n\n" + c["trailer"] + "\n\n" if c.get("trailer") else ""}
     out = os.path.join(S, "briefs", name + ".md")
     if role == "reviewer":
         areas = json.load(open(os.path.join(S, "areas.json"))) if os.path.exists(os.path.join(S, "areas.json")) else {}
@@ -669,8 +671,8 @@ def tick():
     if low and os.path.exists(os.path.join(B, ".tmp-low")):  # tlock's warning, until the supervisor removes the mark
         out.append(f"{low[-1]}; free space there (move large scratch under {S}), then rm {B}/.tmp-low")
     for g in gate_lines(evs):
-        out.append(g + "; extend the test command (swarm.json test_cmd, rerun swarm-init --test-cmd), then "
-                   "`board gate-ok`, or `board gate-ok` if it does run")
+        out.append(g + "; extend the test command (rerun swarm-init with its options and the new --test-cmd), "
+                   "then `board gate-ok`, or only `board gate-ok` if it does run")
     unres = [f["id"] for f in fs.values() if f["state"] == "unresolved"]
     if unres:
         out.append(f"USER unresolved (tell the user once each; board show <id>): {' '.join(unres)}")
@@ -969,37 +971,63 @@ def merge_one(f, c):
         return f"the tests failed (rc={rc}) on the rebased change {head[:9]}, and again on a rerun; output in {logf}"
     if git("rev-parse", "swarm-review", cwd=wt) != old:
         return "retry"
-    for t in unseen_tests(wt, old, head, c["test_cmd"], logf):
-        log("merge-queue", "note", fid, f"GATE {fid} adds {t}, which the test command may not run: "
-            "neither its output nor the command (or a script it names) mentions or globs it")
+    unseen = unseen_tests(wt, old, head, c["test_cmd"], logf)
     ff = subprocess.run(["git", "-C", c["repo"], "merge", "-q", "--ff-only", head], capture_output=True, text=True)
     if ff.returncode:
         log("merge-queue", "status", fid, "fast-forward of swarm-review failed: " + ff.stderr.strip())
         time.sleep(60)
         return "retry"
+    for t in unseen:  # logged once, after the merge: a retried fast-forward would repeat it
+        log("merge-queue", "note", fid, f"GATE {fid} adds {t}, which the test command may not run: neither it nor "
+            "its output names it, a folder holding it or a glob matching it, and it runs no discovering runner for it")
     f["commits"] = git("rev-list", "--reverse", f"{old}..{head}", cwd=wt).split()
     f["sha"] = head
     log("merge-queue", "merged", fid, head)
     return None
 
 
+# A file that is itself a test (not a conftest, fixture or data file under tests/).
+TEST_FILE_RE = re.compile(r"(^|/)test_[^/]*\.\w+$|_test\.\w+$|\.(test|spec)\.\w+$|(^|/)\w*Test\.(kt|java|cs)$")
+# Runners that find the tests of a language by themselves when no test file is named.
+RUNNERS = {".py": r"\bpytest\b|\bunittest\b", ".rs": r"\bcargo\s+(test|nextest)\b", ".go": r"\bgo\s+test\b",
+           ".js": r"\b(jest|vitest|mocha|(npm|yarn|pnpm)\s+(run\s+)?test)\b", ".kt": r"\bgradlew?\b|\bmvn\b",
+           ".java": r"\bgradlew?\b|\bmvn\b", ".cs": r"\bdotnet\s+test\b"}
+RUNNERS.update({e: RUNNERS[".js"] for e in (".ts", ".mjs", ".cjs", ".jsx", ".tsx")})
+
+
 def unseen_tests(wt, old, head, cmd, logf):
-    """Test files the change adds that the gate shows no sign of running: not named in its output, and not
-    named or matched by a glob in the command or in a file the command names. A fixed list of tests in the
-    command would otherwise never run the tests the swarm adds."""
-    added = [p for p in git("diff", "--name-only", "--diff-filter=A", old, head, cwd=wt).split() if TEST_PATH_RE.search(p)]
+    """Test files the change adds that the gate shows no sign of running. A file counts as run when its
+    path, name or stem appears in the gate's output or in the command (or a script the command names), when
+    that text names a folder holding it or has a glob matching it, or when it runs a test runner for the
+    file's language that discovers tests (it names no test file of that language itself). Otherwise a
+    gate that lists its tests, or runs no runner for that language, would never run what the swarm adds."""
+    added = [p for p in git("diff", "--name-only", "--diff-filter=A", old, head, cwd=wt).split() if TEST_FILE_RE.search(p)]
     if not added:
         return []
-    seen = open(logf, errors="replace").read() + "\n" + cmd
-    for tok in shlex.split(cmd, posix=True) if cmd else []:
+    text = cmd
+    for tok in re.findall(r"[\w./-]+", cmd):  # no shlex: a command bash accepts may not split
         p = os.path.join(wt, tok)
         if os.path.isfile(p) and os.path.getsize(p) < 200_000:
-            seen += "\n" + open(p, errors="replace").read()
-    globs = re.findall(r"[\w./{}\[\]-]*\*[\w./*{}\[\]-]*", seen)
+            text += "\n" + open(p, errors="replace").read()
+    out = open(logf, errors="replace").read() if os.path.exists(logf) else ""
+    words = set(re.findall(r"[\w./-]+", text))
+    # Globs from the command and its scripts only, and only with a literal part ("tests/*.py", not "*").
+    globs = [g for g in re.findall(r"[\w./{}\[\]-]*\*[\w./*{}\[\]-]*", text) if re.search(r"\w", g)]
+
     def ran(path):
-        stem = os.path.splitext(os.path.basename(path))[0]
-        return (path in seen or os.path.basename(path) in seen or re.search(rf"\b{re.escape(stem)}\b", seen)
-                or any(fnmatch.fnmatch(path, g) or fnmatch.fnmatch(path, "*/" + g.lstrip("./")) for g in globs))
+        name, ext = os.path.basename(path), os.path.splitext(path)[1]
+        if path in out or name in out or path in text or name in text:
+            return True
+        if re.search(rf"\b{re.escape(os.path.splitext(name)[0])}\b", out + "\n" + text):
+            return True
+        if any(w.strip("./") and (path.startswith(w.strip("./").rstrip("/") + "/")) and os.path.isdir(os.path.join(wt, w))
+               for w in words):
+            return True
+        if any(fnmatch.fnmatch(path, g.lstrip("./")) or fnmatch.fnmatch(path, "*/" + g.lstrip("./")) for g in globs):
+            return True
+        runner = RUNNERS.get(ext)
+        named = any(TEST_FILE_RE.search(w) and w.endswith(ext) for w in words)
+        return bool(runner and re.search(runner, text) and not named)
     return [p for p in added if not ran(p)]
 
 

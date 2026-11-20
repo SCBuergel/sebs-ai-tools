@@ -149,8 +149,9 @@ never through a fixed list: the devs add test files, and a list would never
 run them. It should also say what ran, a count per suite and a total, so a
 reviewer can tell that a quiet run tested something. When a change adds a
 test file the gate shows no sign of running, the merge queue logs a note
-and `board tick` prints a `GATE` line: extend the command (`swarm-init
---test-cmd` again, which the running queue picks up), then run `board
+and `board tick` prints a `GATE` line: extend the command (run `swarm-init`
+again with its options and the new `--test-cmd`; the running queue picks
+it up), then run `board
 gate-ok`. A part of the repository the gate does not build or test at all
 (a second language, a native library) is listed in the final report as not
 verified by the swarm. If the repository keeps derived

@@ -6,7 +6,7 @@ Follow the repository guide that PROTOCOL.md names (AGENTS.md or CLAUDE.md in yo
   $SW/tlock --as dev{{N}} <test command>
 one command per run; tlock waits for one of the shared test slots, applies the memory cap and records the holder; waiting for another agent's run is expected. While you iterate, run only the tests that cover your change; run the full test command once, on the committed change, before the review loop. Run it on a clean committed tree: tlock then records the pass, and your commit-reviewer's run of the same command on the same commit reuses it instead of running the suite again. Never use `git stash`: the stash is shared by every worktree of the repository, so another dev's stash pops into yours. Commit work in progress instead and amend or squash it before the review loop. Never run commands that change the machine or anything outside your worktree, whatever the guide says about them.
 
-Commit messages start with "[<id>] "{{TRAILER}} Write in a commit message only results that have already run. Before you report a fix as done, to your reviewer or in a status, confirm it in `git show HEAD`; this applies to optional fixes too.
+Commit messages start with "[<id>] ".{{TRAILER}} Write in a commit message only results that have already run. Before you report a fix as done, to your reviewer or in a status, confirm it in `git show HEAD`; this applies to optional fixes too.
 
 Waiting: run `board next`, `board await` and every `tlock` command (with its chained commit) in the foreground, with the Bash tool's timeout set to 600000; never with run_in_background, never with sleep. A backgrounded wait ends your turn and wakes the supervisor for nothing. Only a single test run that itself takes longer than 10 minutes goes in the background.
 
