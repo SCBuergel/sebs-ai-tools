@@ -1,7 +1,8 @@
 {
   "name": "sebs-ai-tools",
   "owner": {
-    "name": "Sebastian C. Bürgel"
+    "name": "SCBuergel",
+    "email": "SCBuergel@protonmail.com"
   },
   "metadata": {
     "description": "Seb's AI tools: Claude Code skills and agents, one plugin each."
@@ -14,7 +15,7 @@
       "skills": ["./"],
       "version": "0.6.1",
       "description": "Write and review technical explainers for readers who are technical but new to the system.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -24,7 +25,7 @@
       "skills": ["./"],
       "version": "0.8.0",
       "description": "Install, fund and test the latest Gnosis VPN client on a remote Linux server over SSH without locking yourself out, from a throwaway VM to returning its funds.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -34,7 +35,7 @@
       "skills": ["./"],
       "version": "0.3.0",
       "description": "Report, summarize and compare Gnosis VPN test results from gnosis_vpn-bench runs in a standard way, and push them to a private results repository as soon as a run produces them.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -43,7 +44,7 @@
       "strict": false,
       "version": "0.1.4",
       "description": "Independent read-only reviewer agent: give it a commit range and it answers APPROVED or NOT APPROVED with findings, after reading the repository's AI guide and running its tests.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -53,7 +54,7 @@
       "skills": ["./"],
       "version": "0.1.3",
       "description": "Send the latest local commits to the reviewer session running next to this one, fix its findings, resubmit, and push only on APPROVED.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -63,7 +64,7 @@
       "skills": ["./"],
       "version": "0.7.0",
       "description": "Run a review swarm that coordinates through a shared work board: reviewers audit one area each, short-lived validators judge their findings, devs fix them in parallel with their own commit-reviewers, and a test-gated merge queue merges each fix, watched on a terminal and a web dashboard.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -73,7 +74,7 @@
       "skills": ["./"],
       "version": "0.2.1",
       "description": "Retrospective over agent sessions, including long multi-agent runs: scores friction deterministically across a session and its subagents, then proposes most-severe-first fixes to the environment, skills and workflows. Proposes only.",
-      "author": { "name": "Teebor-Choka, extended by Sebastian C. Bürgel" },
+      "author": { "name": "Teebor-Choka, extended by SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -83,7 +84,7 @@
       "skills": ["./"],
       "version": "0.2.1",
       "description": "Persist the Claude Code sessions running on a Linux machine, interactive and background, and reopen them after a restart, one terminal tab each, in the right folder with the same flags.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -93,7 +94,7 @@
       "skills": ["./"],
       "version": "0.1.0",
       "description": "Gets an API token, key or password from the user into a private mode-600 file without it passing through the chat, and has agents use it only from that file.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -103,7 +104,7 @@
       "skills": ["./"],
       "version": "0.1.2",
       "description": "Rents a cloud machine for one job within an agreed hardware allowlist, price and time cap, deletes it on every exit path with an independent deadline as backup, copies results back as they appear, and times every step.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     },
     {
@@ -112,7 +113,7 @@
       "strict": false,
       "version": "0.1.0",
       "description": "A hook that refuses Bash commands matching processes by their full command line (pkill -f, pgrep -f), which also match, and kill, the shell running them.",
-      "author": { "name": "Sebastian C. Bürgel" },
+      "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
     }
   ]
