@@ -46,7 +46,7 @@ CHECKS = [
 PHONE_W, PHONE_H = 400, 660
 SVG_OPEN = re.compile(r"<svg\b[^>]*>", re.I)
 VIEWBOX = re.compile(r"""viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']""", re.I)
-OVERVIEW = re.compile(r"""\bclass\s*=\s*["'][^"']*\boverview\b""", re.I)
+OVERVIEW = re.compile(r"""(?<![\w-])class\s*=\s*["'][^"']*\boverview\b""", re.I)
 
 
 def layout_problems(page: str) -> list:

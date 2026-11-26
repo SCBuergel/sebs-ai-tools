@@ -25,6 +25,8 @@ def svg(cls, w, h):
     (svg(' class="overview"', 900, 340), 1, "900 x 340"),
     (svg("", 900, 340) + svg(' class="overview"', 340, 600), 1, "first block is not the overview"),
     ("<p>no charts</p>", 1, "first block is not the overview"),
+    ('<svg data-class="overview" viewBox="0 0 340 600"><text>Mbit/s</text></svg>', 1, "first block is not the overview"),
+    ('<svg class="overview"><text>Mbit/s</text></svg>', 1, "has no viewBox"),
 ])
 def test_the_first_chart_must_be_the_overview_and_fit_a_phone(tmp_path, body, rc, says):
     r = run(tmp_path, body)

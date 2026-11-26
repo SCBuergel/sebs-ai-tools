@@ -87,10 +87,10 @@ whether a newer snapshot exists, before they have to ask.
 
 **Time estimate.** `plan` prints `estimate:` lines: the first rung after
 `provision` starts, the ladder per exit, and teardown and the whole run.
-If it prints a `WARNING` that a target file's name matches neither the
-exit's label nor its location, call the exit by its label. Post them in your first reply after starting a
-run, so the user knows when to expect results: setup alone takes about 9
-minutes.
+Post them in your first reply after starting a run, so the user knows when
+to expect results: the first rung comes about 10 minutes after `provision`
+starts. If `plan` prints a `WARNING` that a target file's name matches
+neither the exit's label nor its location, call the exit by its label.
 
 Run bench as `./gnosis_vpn-bench` from its checkout, whose `.venv` has
 `pip install -e '.[remote]'` (the launcher switches to that `.venv` by
@@ -228,7 +228,7 @@ line that `plan` prints (by default `~/.local/state/gvpn-bench/runs/<id>/`),
 not a path in the bench checkout:
 
 ```bash
-tail -n 0 -F RUN_DIR/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING|REMINDER'
+tail -n 0 -F RUN_DIR/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|exit .* via |idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING|REMINDER'
 ```
 
 Do not tee a command's output into a file and watch that: it is
