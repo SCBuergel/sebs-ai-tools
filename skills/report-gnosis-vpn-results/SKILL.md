@@ -152,7 +152,10 @@ After every run:
    showing the page: stop and tell the user (see Privacy). Only when the
    scan is clean does it print the page, with each chart reduced to its
    text labels. Check that:
-   - the first block is the overview chart of all ladder results;
+   - the first block is the overview chart of all ladder results, and it
+     fits one phone screen including its key (at most 400 × 660;
+     inspect-report.py checks both and exits 1 with a `layout:` line when
+     not);
    - per-client system stats are there: CPU mean and max, minimum free RAM,
      and load;
    - tables read correctly at phone width, with no column squeezed to one or
@@ -171,6 +174,12 @@ After every run:
 6. Give the user the app link and the report's GitHub path, `reports/<name>/`
    (`https://github.com/<owner>/<results-repo>/tree/main/reports/<name>`).
    Attach the app link to the report with `results link`.
+
+The user reads reports on a phone. When the user states a visual
+requirement for a chart or a report a second time (for example "text over
+the data, both visible"), the first attempt missed it: render two or three
+variants and show them side by side in one preview, and let the user pick,
+instead of one more attempt. Then fix the renderer to the chosen one.
 
 ## Privacy
 

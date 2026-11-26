@@ -10,7 +10,12 @@ so a real secret does not end up in a transcript. Well-known public
 resolvers (ping targets such as 9.9.9.9) are listed as expected and not
 counted. On any finding it exits 1 and does not print the page.
 
-When the scan is clean (exit 0), it prints the page with every <svg>...</svg>
+It also checks the layout: the page's first chart must be the overview
+(`<svg class="overview" ... viewBox="0 0 W H">`) and fit one phone screen,
+key included: W <= 400 and H <= 660. A layout failure also exits 1, but the
+page is still printed, since it is no privacy problem.
+
+When the scan is clean, it prints the page with every <svg>...</svg>
 reduced to its <text> labels, so the content can be read even when the
 inline charts make the file too large; --scan-only skips that. Read-only.
 """
@@ -35,6 +40,27 @@ CHECKS = [
     ("token prefix", re.compile(r"\b(?:dop_v1_|ghp_|gho_|github_pat_|sk-ant-|xox[bp]-)[A-Za-z0-9_-]{8,}")),
     ("long base64", re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{48,}={0,2}(?![A-Za-z0-9+/=])")),
 ]
+
+
+# One phone screen in viewBox units, which the overview chart maps to about one CSS pixel each.
+PHONE_W, PHONE_H = 400, 660
+SVG_OPEN = re.compile(r"<svg\b[^>]*>", re.I)
+VIEWBOX = re.compile(r"""viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']""", re.I)
+OVERVIEW = re.compile(r"""\bclass\s*=\s*["'][^"']*\boverview\b""", re.I)
+
+
+def layout_problems(page: str) -> list:
+    """Why the first chart does not fit one phone screen, or [] when it does."""
+    first = SVG_OPEN.search(page)
+    if not first or not OVERVIEW.search(first.group(0)):
+        return ["first block is not the overview chart (no <svg class=\"overview\"> before any other chart)"]
+    box = VIEWBOX.search(first.group(0))
+    if not box:
+        return ["the overview chart has no viewBox, so its size on a phone is unknown"]
+    w, h = float(box.group(1)), float(box.group(2))
+    if w > PHONE_W or h > PHONE_H:
+        return [f"the overview chart is {w:g} x {h:g}; it must fit one phone screen, at most {PHONE_W} x {PHONE_H}"]
+    return []
 
 
 def labels(match: re.Match) -> str:
@@ -68,10 +94,14 @@ def main() -> int:
     if findings:
         print("Not showing the page: tell the user before publishing.")
         return 1
+    layout = layout_problems(page)
+    for problem in layout:
+        print(f"layout: {problem}")
+    print(f"layout: {'FAILED, fix the renderer before publishing' if layout else 'first chart fits one phone screen'}")
     if "--scan-only" not in args:
         print("=" * 72)
         print(SVG.sub(labels, page))
-    return 0
+    return 1 if layout else 0
 
 
 if __name__ == "__main__":

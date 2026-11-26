@@ -26,7 +26,12 @@ cases:
   0-4), then measure with `./gnosis_vpn-bench --ssh root@HOST <mode>`.
 
 The server address comes from the user each time. Never write it into files,
-commits or memory. To report the results, use the `report-gnosis-vpn-results`
+commits or memory. Pipe anything you show or attach that may hold an
+address through `./gnosis_vpn-bench mask`, which replaces IPv4 addresses
+with `<ip>`, rather than a hand-written `sed`. Name an exit by its label or
+location (GVPN-FRA-1 is in France), never by a target file's name. `gh` is
+not installed and the user does not want it: read GitHub with `git` over
+HTTPS or SSH, or on the web. To report the results, use the `report-gnosis-vpn-results`
 skill.
 
 ## 0. Golden rule: connecting the VPN kills your SSH session
@@ -68,12 +73,24 @@ If you are locked out anyway, the user must reboot the machine or run `gnosis_vp
 
 ## 1. Get a server
 
-This skill needs a bench checkout that contains commit 4eb776b (branch
-`worktree-execute-teardown-systemexit` until it is merged into `main`):
-check with `git -C ~/gnosis_vpn-bench merge-base --is-ancestor 4eb776b
-HEAD`. On an older checkout, the run log, the pre-flight lines, the `web3`
-line and the HTTP 429 retries below do not exist; tell the user and follow
-that checkout's `docs/runbook.md`.
+This skill needs a bench checkout that contains commit e225d15: check with
+`git -C ~/gnosis_vpn-bench merge-base --is-ancestor e225d15 HEAD`. On an
+older checkout, `versions`, `mask`, the `estimate:` and `REMINDER` lines,
+the run log, the pre-flight lines, the `web3` line and the HTTP 429 retries
+below may not exist; tell the user and follow that checkout's
+`docs/runbook.md`.
+
+**Version first.** Before provisioning, run `./gnosis_vpn-bench versions`,
+which lists the newest package per channel (stable, snapshot,
+experimental; exit 1 when a channel could not be read), and tell the user which version the run will install and
+whether a newer snapshot exists, before they have to ask.
+
+**Time estimate.** `plan` prints `estimate:` lines: the first rung after
+`provision` starts, the ladder per exit, and teardown and the whole run.
+If it prints a `WARNING` that a target file's name matches neither the
+exit's label nor its location, call the exit by its label. Post them in your first reply after starting a
+run, so the user knows when to expect results: setup alone takes about 9
+minutes.
 
 Run bench as `./gnosis_vpn-bench` from its checkout, whose `.venv` has
 `pip install -e '.[remote]'` (the launcher switches to that `.venv` by
@@ -211,7 +228,7 @@ line that `plan` prints (by default `~/.local/state/gvpn-bench/runs/<id>/`),
 not a path in the bench checkout:
 
 ```bash
-tail -n 0 -F RUN_DIR/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING'
+tail -n 0 -F RUN_DIR/logs/run.log | grep --line-buffered -E 'step .* finished|rung [0-9]+|idle ping|ERROR|FAIL|NOT PUSHED|NOT DELETED|TEARDOWN FAILED|WARNING|REMINDER'
 ```
 
 Do not tee a command's output into a file and watch that: it is
@@ -234,13 +251,23 @@ that nothing is left running:
 
 Watchers left running on a finished log have been a problem before.
 
-**Post a preliminary results table after each rung.** After each rung the run
-log has one summary line, `rung N: X of Y clients connected; exit slots a/b in
-use`, and one line per client, `rung N <client>: <Mbit/s> Mbit/s, <bytes> bytes,
-complete <bool>, ping <ms> ms`. After each rung, post the table so far in chat,
-labelled preliminary and raw. Give one row per rung with its status, total
-Mbit/s, per-client Mbit/s, bytes and ping, clients connected and exit slots in
-use. Build it from those lines only. The final numbers come from `result.json`
+**Post a preliminary results table after every result that lands,** in
+whatever benchmark is running, without being asked: after every rung of a
+ladder, and after every exit or measurement of a sweep or a sequential exit
+test. The user asked for this on 2026-11-26. Bench logs `REMINDER: post the
+preliminary results table (…)` after each one, which the watcher above
+passes through. Post the cumulative table so far in chat, labelled
+preliminary and raw. For a ladder, the run log has one summary line per
+rung, `rung N: X of Y clients connected; exit slots a/b in use`, and one line
+per client, `rung N <client>: <Mbit/s> Mbit/s, <bytes> bytes, complete <bool>,
+ping <ms> ms`: give one row per rung with its status, total Mbit/s,
+per-client Mbit/s, bytes and ping, clients connected and exit slots in use.
+For a sweep, the log has one line per exit, `exit <destination> via
+<client>: <status>, <Mbit/s or n/a> Mbit/s, ping <ms or n/a> ms`: give one
+row per exit (its speed is a 5 MiB check, not a throughput result). For a
+sequential exit test, which has no line of its own, give one row per exit
+with its status, speed and ping where measured. Build the table from the
+log lines only. The final numbers come from `result.json`
 (the `report-gnosis-vpn-results` skill).
 
 For a tool that drives the client, run each of its commands once, briefly,
