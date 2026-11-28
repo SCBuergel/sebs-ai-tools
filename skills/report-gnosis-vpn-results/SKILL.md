@@ -114,6 +114,7 @@ not in the repository yet:
 ./gnosis_vpn-bench results push RUN [RUN ...] [--report-name N] [--title T] [--dry-run]
 ./gnosis_vpn-bench results combine REC [REC ...] --name N --title T   # recordings already in the repo
 ./gnosis_vpn-bench results link REPORT LABEL URL                      # e.g. the Claude-app page
+./gnosis_vpn-bench results summarize REPORT "one paragraph"           # shown under the first chart
 ```
 
 These commands do not ask (`--ask` makes them). `push` prints `App copy:
@@ -147,15 +148,21 @@ After every run:
    clients), so read it through
    `python3 -I <skill folder>/scripts/inspect-report.py <App copy>`. It
    first scans the whole file for `<script>` tags, external URLs, IPv4
-   addresses and key-like strings. It prints each finding redacted (kind,
+   addresses and key-like strings. The one external URL it expects is the
+   permalink to the bench commit the report was made with
+   (`https://github.com/SCBuergel/gnosis_vpn-bench/tree/<commit>`); any
+   other is a finding. It prints each finding redacted (kind,
    line, length, a short hash), never in full, and then exits 1 without
    showing the page: stop and tell the user (see Privacy). Only when the
    scan is clean does it print the page, with each chart reduced to its
    text labels. Check that:
    - the first block is the overview chart of all ladder results, and it
-     fits one phone screen including its key (at most 400 × 660;
-     inspect-report.py checks both and exits 1 with a `layout:` line when
-     not);
+     fits one phone screen including its key (at most 400 × 660, or 680 ×
+     660 for the four-column grid `class="overview wide"` the user chose on
+     2026-11-27; inspect-report.py checks both and exits 1 with a `layout:`
+     line when not);
+   - under the first chart come the summary (once step 4 has added it) and the link to the
+     bench commit;
    - per-client system stats are there: CPU mean and max, minimum free RAM,
      and load;
    - tables read correctly at phone width, with no column squeezed to one or
@@ -163,15 +170,28 @@ After every run:
 
    If a check fails, fix the renderer in gnosis_vpn-bench and
    `results rebuild`, then check again. Never edit the file.
-4. Publish that file as it is, as a Claude app artifact, right away. Do not
+4. Write one paragraph in plain words on what happened: what went wrong,
+   where and why, or that nothing did. No list of numbers; the tables and
+   charts carry those. Put it in with
+   `./gnosis_vpn-bench results summarize <report name> "<paragraph>"`
+   (at most 1,200 characters). It is shown right under the first chart,
+   marked as written by an AI, and kept when the same report is pushed
+   again. The command pushes again and prints a new `App copy:`: check it as
+   in step 3. Update the paragraph the same way when later results, such as
+   `recover`, change what it says.
+5. Publish that file as it is, as a Claude app artifact, right away. Do not
    wait for the end of the run. At the same time, send the file itself with
    `SendUserFile` (display: attach), so the user can download it in the
-   Claude mobile app.
-5. `recover` re-renders the report with the payment data and pushes it
+   Claude mobile app. Every file you send the user, such as the report HTML
+   or the heat map PNG, has the run's start date and time in its name: copy
+   it into your scratchpad as, for example,
+   `report-YYYY-MM-DD--HH-MM-SS.html` (from `run.started_at`, UTC) and send
+   the copy. Leave the files in the run and the repository as they are.
+6. `recover` re-renders the report with the payment data and pushes it
    again. Check the new `App copy:` as in step 3. Then republish it to the
    same artifact rather than creating a new one, and send the file again.
    Do the same whenever the same report is pushed again.
-6. Give the user the app link and the report's GitHub path, `reports/<name>/`
+7. Give the user the app link and the report's GitHub path, `reports/<name>/`
    (`https://github.com/<owner>/<results-repo>/tree/main/reports/<name>`).
    Attach the app link to the report with `results link`.
 

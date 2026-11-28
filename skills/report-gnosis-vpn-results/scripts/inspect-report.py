@@ -8,11 +8,16 @@ URLs, IPv4 addresses and key-like strings. Each finding is printed redacted
 (kind, line, length, the first 8 hex digits of its SHA-256), never in full,
 so a real secret does not end up in a transcript. Well-known public
 resolvers (ping targets such as 9.9.9.9) are listed as expected and not
-counted. On any finding it exits 1 and does not print the page.
+counted, and so is the permalink to the bench commit the report was made
+with (https://github.com/SCBuergel/gnosis_vpn-bench/tree/<7-40 hex digits>,
+nothing after it); every other external URL is a finding. On any finding it
+exits 1 and does not print the page.
 
 It also checks the layout: the page's first chart must be the overview
 (`<svg class="overview" ... viewBox="0 0 W H">`) and fit one phone screen,
-key included: W <= 400 and H <= 660. A layout failure also exits 1, but the
+key included: W <= 400 and H <= 660. The four-column variant the user chose
+on 2026-11-27, `<svg class="overview wide" ...>`, may be up to 680 wide.
+A layout failure also exits 1, but the
 page is still printed, since it is no privacy problem.
 
 When the scan is clean, it prints the page with every <svg>...</svg>
@@ -30,6 +35,8 @@ TAG = re.compile(r"<[^>]+>")
 # Namespace URIs inside inline SVG are identifiers, not links.
 NAMESPACES = ("http://www.w3.org/2000/svg", "http://www.w3.org/1999/xlink")
 # Public resolvers used as ping targets are part of the test specification.
+# The report links the exact bench commit it was made with (user's request of 2026-11-27).
+BENCH_PERMALINK = re.compile(r"https://github\.com/SCBuergel/gnosis_vpn-bench/tree/[0-9a-f]{7,40}(?![^\s\"'<>)])")
 PUBLIC_IPS = {"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112"}
 CHECKS = [
     ("script tag", re.compile(r"<script\b", re.I)),
@@ -44,22 +51,27 @@ CHECKS = [
 
 # One phone screen in viewBox units, which the overview chart maps to about one CSS pixel each.
 PHONE_W, PHONE_H = 400, 660
+# The four-column overview ("overview wide") the user chose on 2026-11-27.
+WIDE_W = 680
 SVG_OPEN = re.compile(r"<svg\b[^>]*>", re.I)
 VIEWBOX = re.compile(r"""viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']""", re.I)
-OVERVIEW = re.compile(r"""(?<![\w-])class\s*=\s*["'][^"']*\boverview\b""", re.I)
+CLASS = re.compile(r"""(?<![\w-])class\s*=\s*["']([^"']*)["']""", re.I)
 
 
 def layout_problems(page: str) -> list:
     """Why the first chart does not fit one phone screen, or [] when it does."""
     first = SVG_OPEN.search(page)
-    if not first or not OVERVIEW.search(first.group(0)):
+    cls = CLASS.search(first.group(0)) if first else None
+    classes = cls.group(1).lower().split() if cls else []
+    if "overview" not in classes:
         return ["first block is not the overview chart (no <svg class=\"overview\"> before any other chart)"]
     box = VIEWBOX.search(first.group(0))
     if not box:
         return ["the overview chart has no viewBox, so its size on a phone is unknown"]
     w, h = float(box.group(1)), float(box.group(2))
-    if w > PHONE_W or h > PHONE_H:
-        return [f"the overview chart is {w:g} x {h:g}; it must fit one phone screen, at most {PHONE_W} x {PHONE_H}"]
+    max_w = WIDE_W if "wide" in classes else PHONE_W
+    if w > max_w or h > PHONE_H:
+        return [f"the overview chart is {w:g} x {h:g}; it must fit one phone screen, at most {max_w} x {PHONE_H}"]
     return []
 
 
@@ -81,6 +93,10 @@ def main() -> int:
     page = open(args[0], encoding="utf-8").read()
     findings = 0
     for number, line in enumerate(page.splitlines(), 1):
+        for link in BENCH_PERMALINK.findall(line):
+            print(f"line {number}: bench permalink, expected: {link}")
+        # Blank it out so its commit hash is not counted as a long base64 string either.
+        line = BENCH_PERMALINK.sub(" ", line)
         for name, pattern in CHECKS:
             for hit in pattern.findall(line):
                 if name == "external URL" and hit.startswith(NAMESPACES):

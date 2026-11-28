@@ -33,7 +33,7 @@
       "source": "./skills/report-gnosis-vpn-results",
       "strict": false,
       "skills": ["./"],
-      "version": "0.4.0",
+      "version": "0.5.0",
       "description": "Report, summarize and compare Gnosis VPN test results from gnosis_vpn-bench runs in a standard way, and push them to a private results repository as soon as a run produces them.",
       "author": { "name": "SCBuergel", "email": "SCBuergel@protonmail.com" },
       "license": "MIT"
