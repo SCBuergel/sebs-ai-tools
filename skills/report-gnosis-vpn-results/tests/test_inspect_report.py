@@ -19,16 +19,16 @@ def svg(cls, w, h):
 
 
 @pytest.mark.parametrize("body,rc,says", [
-    (svg(' class="overview"', 340, 600) + svg("", 900, 340), 0, "fits one phone screen"),
-    (svg(' class="overview"', 400, 660), 0, "fits one phone screen"),
+    (svg(' class="overview"', 340, 600) + svg("", 900, 340), 0, "within its size limit"),
+    (svg(' class="overview"', 400, 660), 0, "within its size limit"),
     (svg(' class="overview"', 340, 1240), 1, "340 x 1240"),            # the doubled y axis
     (svg(' class="overview"', 900, 340), 1, "900 x 340"),
     (svg("", 900, 340) + svg(' class="overview"', 340, 600), 1, "first block is not the overview"),
     ("<p>no charts</p>", 1, "first block is not the overview"),
     ('<svg data-class="overview" viewBox="0 0 340 600"><text>Mbit/s</text></svg>', 1, "first block is not the overview"),
     ('<svg class="overview"><text>Mbit/s</text></svg>', 1, "has no viewBox"),
-    (svg(' class="overview wide"', 680, 600), 0, "fits one phone screen"),  # four columns
-    (svg(' class="wide overview"', 680, 660), 0, "fits one phone screen"),
+    (svg(' class="overview wide"', 680, 600), 0, "within its size limit"),  # four columns
+    (svg(' class="wide overview"', 680, 660), 0, "within its size limit"),
     (svg(' class="overview wide"', 700, 600), 1, "at most 680 x 660"),
     (svg(' class="overview wide"', 680, 700), 1, "at most 680 x 660"),
     (svg(' class="overview"', 680, 600), 1, "at most 400 x 660"),          # wide needs the class

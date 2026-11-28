@@ -16,7 +16,8 @@ exits 1 and does not print the page.
 It also checks the layout: the page's first chart must be the overview
 (`<svg class="overview" ... viewBox="0 0 W H">`) and fit one phone screen,
 key included: W <= 400 and H <= 660. The four-column variant the user chose
-on 2026-11-27, `<svg class="overview wide" ...>`, may be up to 680 wide.
+on 2026-11-27, `<svg class="overview wide" ...>`, is meant for a wider
+screen and may be up to 680 wide.
 A layout failure also exits 1, but the
 page is still printed, since it is no privacy problem.
 
@@ -59,7 +60,7 @@ CLASS = re.compile(r"""(?<![\w-])class\s*=\s*["']([^"']*)["']""", re.I)
 
 
 def layout_problems(page: str) -> list:
-    """Why the first chart does not fit one phone screen, or [] when it does."""
+    """Why the first chart is not the overview within its size limit, or [] when it is."""
     first = SVG_OPEN.search(page)
     cls = CLASS.search(first.group(0)) if first else None
     classes = cls.group(1).lower().split() if cls else []
@@ -71,7 +72,7 @@ def layout_problems(page: str) -> list:
     w, h = float(box.group(1)), float(box.group(2))
     max_w = WIDE_W if "wide" in classes else PHONE_W
     if w > max_w or h > PHONE_H:
-        return [f"the overview chart is {w:g} x {h:g}; it must fit one phone screen, at most {max_w} x {PHONE_H}"]
+        return [f"the overview chart is {w:g} x {h:g}; it must be at most {max_w} x {PHONE_H}"]
     return []
 
 
@@ -113,7 +114,7 @@ def main() -> int:
     layout = layout_problems(page)
     for problem in layout:
         print(f"layout: {problem}")
-    print(f"layout: {'FAILED, fix the renderer before publishing' if layout else 'first chart fits one phone screen'}")
+    print(f"layout: {'FAILED, fix the renderer before publishing' if layout else 'first chart is the overview, within its size limit'}")
     if "--scan-only" not in args:
         print("=" * 72)
         print(SVG.sub(labels, page))
